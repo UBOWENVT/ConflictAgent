@@ -1,0 +1,18 @@
+# Versions intentionally unpinned for the first install.
+# After a working setup, freeze exact versions: pip freeze > requirements.lock
+
+# --- LLM SDKs ---
+openai                 # solver (GPT-5.x)
+anthropic              # judge (Claude)
+google-genai           # solver (Gemini 3.x); NOTE: baseline used the older google-generativeai
+
+# --- Java syntax validation (pure-Python AST parser) ---
+javalang
+
+# --- Data ---
+pandas
+openpyxl               # read ConflictBench.xlsx
+
+# --- Utils ---
+python-dotenv          # load .env
+tenacity               # API retry / backoff
