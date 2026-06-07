@@ -1,9 +1,13 @@
 """Load ConflictBench scenarios + ground-truth labels.
 
 Primary source = data/ConflictBench.xlsx, sheet 'Paper_Textual_Conflict' (180 rows,
-136 true + 44 false conflicts; 106 Java + 74 Non-Java). For region-only input
-(SPEC #2) the xlsx CODE SNIPPET columns are sufficient — the full scenario folders
-are only needed for LOCAL syntax validation (see validate.py).
+136 true + 44 false conflicts; 106 Java + 74 Non-Java). The xlsx CODE SNIPPET columns
+provide the developer ground truth + manual labels.
+
+Full per-scenario files (base/left/right/child) live under data/scenarios/{project}__{commit}/
+once fetched (scripts/fetch_data.py). They feed merge.reconstruct_merged() + validate.syntax_valid().
+157/180 scenarios are reconstructable (conflict File Name present in base+left+right); the rest
+are add/delete/rename cases.
 
 Gotchas (verified 2026-06-06):
   - The desirability column is misspelled '{Tool}_Desirability_Same_Developper' (double p).
@@ -13,6 +17,7 @@ Gotchas (verified 2026-06-06):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -48,12 +53,12 @@ def _tool_columns(tool: str) -> tuple[str, str, str]:
 class Scenario:
     project: str
     commit: str
-    file_name: str
+    file_name: str               # conflict file's repo sub-path
     file_type: str               # 'Java' / 'Non-Java'
     valid_conflict: bool | None  # True = genuinely unresolvable conflict
-    left_diff: str               # base -> left
-    right_diff: str              # base -> right
-    conflict_chunk: str          # git-merge conflict region (markers present)
+    left_diff: str               # base -> left (xlsx snippet; reference)
+    right_diff: str              # base -> right (xlsx snippet; reference)
+    conflict_chunk: str          # xlsx MERGED snippet (reference; pipeline uses merge.py)
     developer: str               # CHILD = ground-truth resolution
 
     @property
@@ -120,3 +125,22 @@ def load_manual_labels() -> list[ManualLabel]:
                 continue
             out.append(ManualLabel(_s(r[_C_PROJECT]), tool, _s(r[snip_col]), dev, label))
     return out
+
+
+# --- Full per-scenario files (fetched by scripts/fetch_data.py) ---------------
+
+def scenario_dir(s: Scenario) -> Path:
+    return config.DATA_DIR / "scenarios" / f"{s.project}__{s.commit}"
+
+
+def load_full_versions(s: Scenario) -> dict[str, str] | None:
+    """Return {ver: text} for base/left/right (and child if present), or None if the
+    full files for this scenario haven't been fetched / aren't reconstructable.
+    """
+    d = scenario_dir(s)
+    out: dict[str, str] = {}
+    for ver in ("base", "left", "right", "child"):
+        p = d / ver
+        if p.exists():
+            out[ver] = p.read_text(encoding="utf-8", errors="replace")
+    return out if {"base", "left", "right"} <= out.keys() else None
