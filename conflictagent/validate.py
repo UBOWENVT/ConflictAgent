@@ -50,11 +50,18 @@ def splice_resolution(merged: str, resolution: str, count: int = 0) -> str:
 
 
 def syntax_valid(java_text: str) -> tuple[bool, str]:
-    """Parse Java source with javalang. Return (ok, error_message)."""
+    """Parse Java source with javalang. Return (ok, error_message).
+
+    javalang's exceptions often have an empty str(); we surface `.description` and the
+    failing token (`.at`) so the retry feedback to the solver is actually informative.
+    """
     import javalang  # lazy
 
     try:
         javalang.parse.parse(java_text)
         return True, ""
     except Exception as e:  # JavaSyntaxError, LexerError, etc.
-        return False, f"{type(e).__name__}: {e}"
+        desc = getattr(e, "description", None) or str(e) or type(e).__name__
+        at = getattr(e, "at", None)
+        loc = f" (at {at})" if at else ""
+        return False, f"{desc}{loc}"
