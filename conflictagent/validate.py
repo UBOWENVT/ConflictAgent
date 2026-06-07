@@ -1,42 +1,54 @@
 """Inference-time validation signals for the agent loop (NO ground truth).
 
-These are the only signals the loop may use to decide whether to retry — they are
-all computable without the developer's answer:
+All functions here are computable without the developer's answer — they are the only
+signals the loop may use to decide whether to retry:
 
-  1. syntax_valid(full_file_text) -> (ok: bool, error: str)
-       Parse the full file with javalang. Java only (106/180 scenarios). Non-Java
-       files (pom.xml, gradle, etc.) need a different check (e.g. XML well-formedness)
-       or are excluded from the syntax-valid-rate metric.
-  2. has_conflict_markers(text) -> bool
-       Detect leftover '<<<<<<<' / '=======' / '>>>>>>>' (and diff3 '|||||||').
+  - has_conflict_markers(text)      -> leftover <<<<<<< / ======= / >>>>>>> (and diff3 |||||||)
+  - extract_conflict_region(merged) -> the first <<<<<<< ... >>>>>>> block (solver input)
+  - splice_resolution(merged, res)  -> put the candidate back where the conflict was
+  - syntax_valid(java_text)         -> (ok, error) via javalang  [Java only]
 
-To validate, the candidate resolution is spliced back into the FULL file (read
-locally from the scenario folder) and then parsed. The full file is needed ONLY
-here, never in the LLM prompt.
+The full merged file (with markers) comes from merge.reconstruct_merged(); splicing the
+candidate into it and parsing gives the syntax-valid signal. Tested on real ConflictBench
+scenarios 2026-06-06.
 """
 from __future__ import annotations
 
 import re
 
-_MARKER_RE = re.compile(r"^(<{7}|={7}|>{7}|\|{7})", re.MULTILINE)
+# A line beginning with a 7-char conflict marker.
+_MARKER_LINE = re.compile(r"^(<{7}|={7}|>{7}|\|{7})", re.MULTILINE)
+
+# A whole conflict block from '<<<<<<<' through the next '>>>>>>>' line (DOTALL).
+_CONFLICT_BLOCK = re.compile(r"^<{7}.*?^>{7}.*?$", re.DOTALL | re.MULTILINE)
 
 
 def has_conflict_markers(text: str) -> bool:
     """True if any git/diff3 conflict marker line remains."""
-    return bool(_MARKER_RE.search(text or ""))
+    return bool(_MARKER_LINE.search(text or ""))
 
 
-def syntax_valid(full_file_text: str) -> tuple[bool, str]:
-    """Parse Java source with javalang; return (ok, error_message).
+def extract_conflict_region(merged: str) -> str | None:
+    """Return the first conflict block (the region shown to the solver), or None."""
+    m = _CONFLICT_BLOCK.search(merged or "")
+    return m.group(0) if m else None
 
-    TODO: import javalang; try javalang.parse.parse(full_file_text); on
-    JavaSyntaxError/LexerError return (False, str(e)); else (True, "").
+
+def splice_resolution(merged: str, resolution: str, count: int = 0) -> str:
+    """Replace conflict block(s) in `merged` with `resolution`.
+
+    count=0 replaces all blocks; count=1 replaces only the first. (Most scenarios have
+    a single block; multi-block files would need per-block resolutions — a later concern.)
     """
-    raise NotImplementedError
+    return _CONFLICT_BLOCK.sub(lambda _m: resolution, merged, count=count)
 
 
-def splice_resolution(full_file_text: str, conflict_chunk: str, resolution: str) -> str:
-    """Replace the conflict region in the full file with the candidate resolution,
-    so the result can be syntax-checked. TODO: locate the chunk and substitute.
-    """
-    raise NotImplementedError
+def syntax_valid(java_text: str) -> tuple[bool, str]:
+    """Parse Java source with javalang. Return (ok, error_message)."""
+    import javalang  # lazy
+
+    try:
+        javalang.parse.parse(java_text)
+        return True, ""
+    except Exception as e:  # JavaSyntaxError, LexerError, etc.
+        return False, f"{type(e).__name__}: {e}"
