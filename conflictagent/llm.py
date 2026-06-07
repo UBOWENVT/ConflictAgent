@@ -6,6 +6,8 @@ bodies) — the module itself imports without any SDK installed.
 
 Wraps with tenacity retry for transient / rate-limit errors. Key-validation
 errors are raised immediately without retry.
+
+Gemini uses the current `google-genai` SDK (`from google import genai`).
 """
 from __future__ import annotations
 
@@ -22,10 +24,10 @@ from . import config
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Lazy-initialized state (created on first call, not on import)
+# Lazy-initialized clients (created on first call, not on import)
 # ---------------------------------------------------------------------------
 _openai_client = None
-_gemini_configured = False
+_gemini_client = None
 
 
 def _get_openai():
@@ -39,15 +41,15 @@ def _get_openai():
     return _openai_client
 
 
-def _ensure_gemini():
-    global _gemini_configured
-    if not _gemini_configured:
-        import google.generativeai as genai  # lazy
+def _get_gemini():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai  # lazy (google-genai SDK)
 
         if not config.GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY not set — fill in .env")
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        _gemini_configured = True
+        _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
+    return _gemini_client
 
 
 def _get_anthropic():
@@ -67,22 +69,14 @@ def call(provider: str, model: str, system: str, user: str, **kwargs) -> str:
 
     Validates key existence immediately (no retry). The actual API call is
     retried on transient errors via `_call_api`.
-
-    Parameters
-    ----------
-    provider : 'openai' | 'anthropic' | 'gemini'
-    model    : API model-id string (see config.SOLVER_MODELS / JUDGE_MODEL)
-    system   : system-prompt text
-    user     : user-prompt text
-    **kwargs : passed through to the provider SDK call
     """
     # Fail fast on missing keys (before any retry loop).
     if provider == "openai":
-        _get_openai()          # raises ValueError if key missing
+        _get_openai()
     elif provider == "anthropic":
         _get_anthropic()
     elif provider == "gemini":
-        _ensure_gemini()
+        _get_gemini()
     else:
         raise ValueError(f"Unknown provider: {provider!r}")
 
@@ -121,14 +115,17 @@ def _call_api(provider: str, model: str, system: str, user: str, **kwargs) -> st
         return resp.content[0].text
 
     elif provider == "gemini":
-        import google.generativeai as genai
+        from google.genai import types  # lazy
 
-        gm = genai.GenerativeModel(model_name=model, system_instruction=system)
-        resp = gm.generate_content(user)
-        # resp.text raises if the response was blocked by safety filters.
-        # Let tenacity retry handle transient blocks; persistent blocks will
-        # surface after max attempts.
-        return resp.text
+        client = _get_gemini()
+        resp = client.models.generate_content(
+            model=model,
+            contents=user,
+            config=types.GenerateContentConfig(system_instruction=system, **kwargs),
+        )
+        # resp.text raises / is None if the response was blocked by safety filters;
+        # tenacity retries transient blocks, persistent ones surface after max attempts.
+        return resp.text or ""
 
     # unreachable (call() already validated provider)
     raise ValueError(f"Unknown provider: {provider!r}")

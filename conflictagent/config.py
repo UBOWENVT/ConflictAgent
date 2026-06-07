@@ -27,7 +27,7 @@ GOLD_SHEET = "Paper_Textual_Conflict"          # 180 rows, one scenario each
 # Two solvers (mirrors the single-shot baseline's two-model setup) + one judge.
 # Hard rule: solver != judge (avoid self-preference). TODO: verify exact ids.
 SOLVER_MODELS = {
-    "openai": "gpt-5.4",           # TODO verify exact id in OpenAI dashboard
+    "openai": "gpt-5.4-2026-03-05",           # TODO verify exact id in OpenAI dashboard
     "gemini": "gemini-3.5-flash",  # TODO verify exact id in AI Studio
 }
 JUDGE_MODEL = ("anthropic", "claude-sonnet-4-6")  # bump to Opus 4.8 if judge accuracy is short
