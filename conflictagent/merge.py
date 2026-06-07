@@ -18,9 +18,11 @@ import tempfile
 def reconstruct_merged(base: str, left: str, right: str) -> tuple[str, bool]:
     """Return (merged_text_with_markers, had_conflict).
 
-    Runs:  git merge-file -p <left> <base> <right>   (left = ours, right = theirs)
-    git merge-file exits 0 for a clean merge and with the number of remaining conflicts
-    otherwise, so had_conflict = (returncode != 0).
+    Runs:  git merge-file --diff3 -p <left> <base> <right>   (left = ours, right = theirs)
+    The --diff3 form keeps the common-base section (between ||||||| and =======) inside the
+    conflict markers, so the solver sees base/left/right all at once. git merge-file exits 0
+    for a clean merge and with the number of remaining conflicts otherwise, so
+    had_conflict = (returncode != 0).
     """
     with tempfile.TemporaryDirectory() as d:
         p_left = os.path.join(d, "left")
@@ -30,7 +32,7 @@ def reconstruct_merged(base: str, left: str, right: str) -> tuple[str, bool]:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
         proc = subprocess.run(
-            ["git", "merge-file", "-p",
+            ["git", "merge-file", "--diff3", "-p",
              "-L", "left", "-L", "base", "-L", "right",
              p_left, p_base, p_right],
             capture_output=True,

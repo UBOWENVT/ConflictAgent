@@ -34,6 +34,12 @@ def extract_conflict_region(merged: str) -> str | None:
     return m.group(0) if m else None
 
 
+def conflict_blocks(merged: str) -> list[str]:
+    """Return all conflict blocks. MVP targets single-block scenarios; len != 1 is flagged
+    by the agent (multi-block would need per-block resolutions)."""
+    return _CONFLICT_BLOCK.findall(merged or "")
+
+
 def splice_resolution(merged: str, resolution: str, count: int = 0) -> str:
     """Replace conflict block(s) in `merged` with `resolution`.
 
