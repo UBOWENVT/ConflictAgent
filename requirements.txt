@@ -4,7 +4,7 @@
 # --- LLM SDKs ---
 openai                 # solver (GPT-5.x)
 anthropic              # judge (Claude)
-google-genai           # solver (Gemini 3.x); NOTE: baseline used the older google-generativeai
+google-generativeai    # solver (Gemini 3.x); import as google.generativeai (baseline-verified)
 
 # --- Java syntax validation (pure-Python AST parser) ---
 javalang
