@@ -131,7 +131,9 @@ def main() -> None:
             fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
             fh.flush()
 
-        for s, fv in usable:
+        n_total = len(usable)
+        for idx, (s, fv) in enumerate(usable, 1):
+            print(f"  [{idx}/{n_total}] {s.id}", flush=True)
             merged, _ = merge.reconstruct_merged(fv["base"], fv["left"], fv["right"])
             blocks = validate.conflict_blocks(merged)
             tgt, _ = groundtruth.select_target_block(merged, s.conflict_chunk)
