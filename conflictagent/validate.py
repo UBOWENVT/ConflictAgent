@@ -49,6 +49,21 @@ def splice_resolution(merged: str, resolution: str, count: int = 0) -> str:
     return _CONFLICT_BLOCK.sub(lambda _m: resolution, merged, count=count)
 
 
+def block_spans(merged: str) -> list[tuple[int, int]]:
+    """(start, end) character spans of every conflict block, in order."""
+    return [(m.start(), m.end()) for m in _CONFLICT_BLOCK.finditer(merged or "")]
+
+
+def splice_block(merged: str, resolution: str, block_index: int) -> str:
+    """Replace ONLY the conflict block at `block_index` with `resolution`; leave the rest
+    of the file (including any other conflict blocks) untouched."""
+    spans = block_spans(merged)
+    if not (0 <= block_index < len(spans)):
+        return merged
+    s, e = spans[block_index]
+    return merged[:s] + resolution + merged[e:]
+
+
 def syntax_valid(java_text: str) -> tuple[bool, str]:
     """Parse Java source with javalang. Return (ok, error_message).
 
