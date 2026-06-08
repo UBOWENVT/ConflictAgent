@@ -1,58 +1,79 @@
 """Offline LLM-as-judge (SPEC architecture layer A — uses ground truth, OUTSIDE the loop).
 
-Judges whether a candidate resolution is SEMANTICALLY EQUIVALENT to the developer's actual
-resolution. Uses config.JUDGE_MODEL — a different vendor from the solvers (avoid self-preference).
+Judges whether a candidate resolution is an ACCEPTABLE resolution of a merge conflict relative to
+the developer's actual resolution — i.e. it captures the developer's merge intent and behavior,
+even if not character-identical. This deliberately targets the human "desirability" notion, NOT
+strict character/AST equivalence: calibration (scripts/calibrate_judge.py) against ConflictBench's
+~627 manual desirability labels showed that a strict-equivalence rubric tanks recall (it flags
+acceptable import-subset / reordering differences as failures), so the rubric below tolerates
+housekeeping differences while still rejecting unresolved output and real logic/value differences.
 
-Before trusting the judge for headline numbers, calibrate it against ConflictBench's ~627 manual
-desirability labels (scripts/calibrate_judge.py) and report the agreement rate.
+Uses config.JUDGE_MODEL — a different vendor from the solvers (avoid self-preference).
+The return key is 'equivalent' (bool) for pipeline compatibility; it now means "acceptable".
 """
 from __future__ import annotations
 
 from . import config, llm
 
 JUDGE_SYSTEM = (
-    "You are evaluating a resolved Git merge conflict. You are given a CANDIDATE resolution and "
-    "the DEVELOPER's actual resolution for the same conflict. Decide whether the candidate is "
-    "SEMANTICALLY EQUIVALENT to the developer's resolution: would they behave the same way and "
-    "express the same intent?\n\n"
-    "- Ignore differences in whitespace, indentation, formatting, comments, and trivial reordering.\n"
-    "- Treat as NOT equivalent any real difference: different logic or values, missing or extra "
-    "code, a different choice between the two sides.\n\n"
+    "You are reviewing a resolved Git merge conflict. You are given a CANDIDATE resolution and the "
+    "DEVELOPER's actual resolution of the SAME conflict. Decide whether the candidate is an "
+    "ACCEPTABLE resolution: would a careful reviewer accept it as resolving the conflict the way the "
+    "developer intended — same behavior and same essential content — even if not character-identical?"
+    "\n\nACCEPT (these alone do NOT make it unacceptable):\n"
+    "- whitespace, indentation, formatting, or comments;\n"
+    "- ordering of imports, fields, or methods;\n"
+    "- a different but behaviorally equivalent phrasing of the same logic;\n"
+    "- a different set of import statements (which imports are present is housekeeping, not logic), "
+    "as long as the actual code is consistent.\n\n"
+    "REJECT as NOT_ACCEPTABLE:\n"
+    "- the candidate still contains conflict markers (<<<<<<<, =======, >>>>>>>) or is otherwise an "
+    "unresolved / partial merge — failing to resolve is never acceptable;\n"
+    "- different program logic or behavior;\n"
+    "- different literal values that matter (version numbers, constants, configuration values);\n"
+    "- missing or extra FUNCTIONAL code (statements, methods, conditions — not imports);\n"
+    "- choosing a different side's behavior than the developer did.\n\n"
     "Output exactly two lines and nothing else:\n"
-    "VERDICT: EQUIVALENT or NOT_EQUIVALENT\n"
+    "VERDICT: ACCEPTABLE or NOT_ACCEPTABLE\n"
     "REASON: <one short sentence>"
 )
 
 
 def _parse(text: str) -> tuple[bool | None, str]:
-    """Return (equivalent, reason). equivalent is None if the verdict can't be parsed."""
-    equivalent: bool | None = None
+    """Return (acceptable, reason). acceptable is None if the verdict can't be parsed.
+
+    Order matters: 'NOT_ACCEPTABLE' contains 'ACCEPTABLE', so test the negative first.
+    """
+    acceptable: bool | None = None
     reason = ""
     for line in (text or "").splitlines():
         lu = line.upper()
-        if equivalent is None and "VERDICT" in lu:
-            if "NOT_EQUIVALENT" in lu or "NOT EQUIVALENT" in lu:
-                equivalent = False
-            elif "EQUIVALENT" in lu:
-                equivalent = True
-        elif line.upper().startswith("REASON"):
+        if acceptable is None and "VERDICT" in lu:
+            if "NOT_ACCEPTABLE" in lu or "NOT ACCEPTABLE" in lu:
+                acceptable = False
+            elif "ACCEPTABLE" in lu:
+                acceptable = True
+        elif lu.startswith("REASON"):
             reason = line.split(":", 1)[-1].strip()
-    if equivalent is None:  # fallback: scan whole text
+    if acceptable is None:  # fallback: scan whole text
         up = (text or "").upper()
-        if "NOT_EQUIVALENT" in up or "NOT EQUIVALENT" in up:
-            equivalent = False
-        elif "EQUIVALENT" in up:
-            equivalent = True
-    return equivalent, reason
+        if "NOT_ACCEPTABLE" in up or "NOT ACCEPTABLE" in up:
+            acceptable = False
+        elif "ACCEPTABLE" in up:
+            acceptable = True
+    return acceptable, reason
 
 
 def judge_equivalent(candidate: str, developer: str) -> dict:
-    """Return {'equivalent': bool|None, 'reason': str, 'raw': str} for one pair."""
+    """Return {'equivalent': bool|None, 'reason': str, 'raw': str} for one pair.
+
+    'equivalent' means "acceptable per the rubric" (kept under this key for pipeline compatibility).
+    """
     provider, model = config.JUDGE_MODEL
     user = (
         "## Candidate resolution:\n" + (candidate or "(empty)") +
         "\n\n## Developer's resolution:\n" + (developer or "(empty)")
     )
     raw = llm.call(provider, model, JUDGE_SYSTEM, user)
-    equivalent, reason = _parse(raw)
-    return {"equivalent": equivalent, "reason": reason, "raw": raw}
+    acceptable, reason = _parse(raw)
+    return {"equivalent": acceptable, "reason": reason, "raw": raw}
