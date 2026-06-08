@@ -64,6 +64,42 @@ def splice_block(merged: str, resolution: str, block_index: int) -> str:
     return merged[:s] + resolution + merged[e:]
 
 
+def split_diff3_block(block: str) -> tuple[str, str, str]:
+    """Split one diff3 conflict block into (left, base, right) code, markers stripped.
+
+    Expects the `git merge-file --diff3` shape:
+        <<<<<<< left
+        <left lines>
+        ||||||| base
+        <base lines>
+        =======
+        <right lines>
+        >>>>>>> right
+    A non-diff3 block (no ||||||| section) yields base=''. Used to build the trivial
+    pick-left / pick-right / pick-longer / union baselines in evaluation.
+    """
+    left: list[str] = []
+    base: list[str] = []
+    right: list[str] = []
+    section = None  # 'left' | 'base' | 'right'
+    for l in (block or "").splitlines():
+        if l.startswith("<<<<<<<"):
+            section = "left"
+        elif l.startswith("|||||||"):
+            section = "base"
+        elif l.startswith("======="):
+            section = "right"
+        elif l.startswith(">>>>>>>"):
+            section = None
+        elif section == "left":
+            left.append(l)
+        elif section == "base":
+            base.append(l)
+        elif section == "right":
+            right.append(l)
+    return "\n".join(left), "\n".join(base), "\n".join(right)
+
+
 def syntax_valid(java_text: str) -> tuple[bool, str]:
     """Parse Java source with javalang. Return (ok, error_message).
 
