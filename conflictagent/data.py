@@ -32,6 +32,22 @@ TOOLS = ["FSTMerge", "JDime", "IntelliMerge", "AutoMerge", "KDIFF3"]  # xlsx col
 # xlsx tool name -> repo folder name (only KDIFF3 differs in casing)
 _TOOL_FOLDER = {"KDIFF3": "KDiff3"}
 
+# ConflictBench detection errata. Verified 2026-06-07 against the repo's actual tool output
+# artifacts (resolved files + KDIFF3 run screenshots): 4 (project, commit, tool) pairs where the
+# human '{Tool} Strategy' label disagrees with what the tool actually produced. Maps to the
+# corrected is_punt value (True = tool left the conflict unresolved). This is the file-grounded
+# correction layered on top of the Strategy column (the xlsx itself is left untouched).
+_DETECTION_OVERRIDES = {
+    # Labeled 'still conflict' but KDIFF3 actually RESOLVED (folder has 'merge success.png' + a
+    # clean .java with no markers) -> not a punt:
+    ("GCViewer", "ff12c68854fc4b37c8a0149063b93b0ea2f68c46", "KDIFF3"): False,
+    ("light-task-scheduler", "c96cd543e694396ec3ba9292159eeddbd9603bd2", "KDIFF3"): False,
+    # Labeled with a non-'still conflict' strategy but the FSTMerge output still contains conflict
+    # markers (##FSTMerge## / kept multiple versions) -> actually a punt:
+    ("caffeine", "7a5b3f112e8f5f71821471da4eddd91d8e52ea36", "FSTMerge"): True,
+    ("openapi-generator", "bade71c6bacc2bfdd0ea400da313959c32cf8a6b", "FSTMerge"): True,
+}
+
 # All resolved-file folders that may exist per scenario (folder names, not xlsx names).
 _RESOLVED_VERS = ("base", "left", "right", "child",
                   "FSTMerge", "IntelliMerge", "AutoMerge", "JDime", "KDiff3")
@@ -95,6 +111,21 @@ class ManualLabel:
     developer: str               # xlsx CHILD snippet (unified diff; fallback)
     merged_snippet: str          # xlsx MERGED snippet (for select_target_block)
     desirable: bool              # human: tool resolution acceptable vs developer
+    valid_conflict: bool | None  # True = genuine (unresolvable) conflict; for detection stratification
+    tool_strategy: str           # human annotation of what the tool's output did ('still conflict' = punt)
+
+    @property
+    def is_punt(self) -> bool:
+        """True if the tool left the conflict unresolved (a detection event, not a resolution).
+
+        Base signal = human '{Tool} Strategy' column ('still conflict'), corrected by 4 file-verified
+        overrides (see _DETECTION_OVERRIDES). Across all 627 pairs, Strategy agrees with the tool's
+        actual output artifact on 623; the 4 disagreements are the override entries.
+        """
+        ov = _DETECTION_OVERRIDES.get((self.project, self.commit, self.tool))
+        if ov is not None:
+            return ov
+        return self.tool_strategy.strip().lower() == "still conflict"
 
 
 def _s(v) -> str:
@@ -136,12 +167,14 @@ def load_manual_labels() -> list[ManualLabel]:
         dev = _s(r[_C_CHILD])
         merged = _s(r[_C_MERGED])
         proj, commit = _s(r[_C_PROJECT]), _s(r[_C_COMMIT])
+        vc = _b(r[_C_VALID])
         for tool in TOOLS:
             _, desc_col, snip_col = _tool_columns(tool)
             label = _b(r[desc_col])
             if label is None:
                 continue
-            out.append(ManualLabel(proj, commit, tool, _s(r[snip_col]), dev, merged, label))
+            strat = _s(r[f"{tool} Strategy"])
+            out.append(ManualLabel(proj, commit, tool, _s(r[snip_col]), dev, merged, label, vc, strat))
     return out
 
 

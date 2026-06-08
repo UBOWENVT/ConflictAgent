@@ -65,9 +65,22 @@ def main() -> None:
 
     tp = fp = tn = fn = skipped = unparsed = 0
     src = {"file": 0, "xlsx": 0}
+    det_total = det_true = 0  # tool punts: output still has conflict markers = a detection event
     print(f"Calibrating judge ({config.JUDGE_MODEL[1]}) on {len(labels)} labels")
     with open(out_path, "w", encoding="utf-8") as fh:
         for lab in labels:
+            # A tool that LEFT the conflict unresolved (Strategy == 'still conflict') is a detection
+            # event, not a resolution. It belongs to the detection metric, not desirability, so
+            # exclude it here and tally it separately. Signal = authoritative human Strategy label.
+            if lab.is_punt:
+                det_total += 1
+                if lab.valid_conflict:
+                    det_true += 1
+                fh.write(json.dumps({"project": lab.project, "tool": lab.tool, "kind": "detection",
+                                     "valid_conflict": lab.valid_conflict, "manual": lab.desirable},
+                                    ensure_ascii=False) + "\n")
+                fh.flush()
+                continue
             cand, dev, source = build_pair(lab)
             if source == "xlsx" and (not cand.strip() or not dev.strip()):
                 skipped += 1  # genuinely-missing xlsx fallback (file path may have empty=deletion)
@@ -77,7 +90,7 @@ def main() -> None:
                 eq = v["equivalent"]
             except Exception as e:
                 eq, v = None, {"error": repr(e)}
-            rec = {"project": lab.project, "tool": lab.tool, "source": source,
+            rec = {"project": lab.project, "tool": lab.tool, "kind": "desirability", "source": source,
                    "manual": lab.desirable, "judge": eq, "reason": v.get("reason", "")}
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()
@@ -98,11 +111,17 @@ def main() -> None:
     acc = (tp + tn) / n if n else 0.0
     prec = tp / (tp + fp) if (tp + fp) else 0.0
     rec_ = tp / (tp + fn) if (tp + fn) else 0.0
-    print("\n=== judge vs human (human label = ground truth) ===")
+    print("\n=== DESIRABILITY judge vs human (clean tool resolutions only) ===")
     print(f"  judged: {n}   skipped(empty): {skipped}   unparsed: {unparsed}")
     print(f"  source: file={src['file']}  xlsx-fallback={src['xlsx']}")
     print(f"  TP={tp}  FP={fp}  TN={tn}  FN={fn}")
     print(f"  accuracy={acc:.1%}  precision={prec:.1%}  recall={rec_:.1%}")
+    print("\n=== DETECTION events (tool left conflict markers; excluded from desirability above) ===")
+    if det_total:
+        print(f"  tool punts: {det_total}   on true conflicts: {det_true}   "
+              f"detection precision: {det_true / det_total:.1%}")
+    else:
+        print("  none in this slice")
     print(f"\nRecords -> {out_path}")
 
 
