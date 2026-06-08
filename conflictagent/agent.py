@@ -1,41 +1,51 @@
-"""The validate-and-repair loop (SPEC architecture layer B — NO ground truth).
+"""The resolve-or-punt loop for one scenario (SPEC layer B — NO ground truth in the loop).
 
-For one scenario:
-    merged, _ = merge.reconstruct_merged(base, left, right)   # diff3, with markers
-    region    = the single conflict block
-    round 0:  solver.solve(region)                            # == single-shot baseline
-    validate: splice candidate back into merged -> syntax (Java) + leftover-marker check
-    while invalid and round < MAX_RETRIES:
-        round += 1
-        solver.solve(region, prior_attempt, validator_error)  # feed the error back
-        validate
-    finalize
+    merged, _ = merge.reconstruct_merged(base, left, right)   # full file, diff3 markers
+    target    = groundtruth.select_target_block(merged, xlsx MERGED)   # the annotated block
+    mark the target block, show the WHOLE file to the solver
+    solver.solve -> either:
+       TRUE_CONFLICT  -> punt (predicted true conflict); a Detection event; no validation
+       RESOLVE        -> a resolution of the target block; validate + retry loop
+    validate (no ground truth): the resolution is marker-free; for single-block files also
+    splice + syntax-check the whole file. Multi-block files keep their other blocks, so a
+    full parse isn't possible — a marker-free resolution is accepted.
 
-The candidate at EVERY round is recorded so metrics can show improvement per retry round
-(round 0 = the loop-off baseline). The judge is NOT called here — it runs afterwards,
-outside the loop (see judge.py). Multi-block conflicts are flagged, not resolved (MVP).
+    The judge is NOT called here; desirability is judged afterwards, outside the loop (run_eval).
 """
 from __future__ import annotations
 
-from . import config, merge, solver, validate
+from . import config, groundtruth, merge, solver, validate
 from .data import Scenario
 
 
-def _validate(spliced: str, is_java: bool) -> tuple[bool, str]:
-    """Return (valid, error) using only inference-time signals (no ground truth)."""
-    if validate.has_conflict_markers(spliced):
+def _annotate_target(merged: str, target_idx: int) -> str:
+    """Tag the target conflict block's opening <<<<<<< line so the solver acts on that one."""
+    spans = validate.block_spans(merged)
+    s, e = spans[target_idx]
+    block = merged[s:e]
+    nl = block.find("\n")
+    if nl == -1:
+        tagged = block + "   " + solver.TARGET_TAG
+    else:
+        tagged = block[:nl] + "   " + solver.TARGET_TAG + block[nl:]
+    return merged[:s] + tagged + merged[e:]
+
+
+def _validate(resolution: str, merged: str, target_idx: int, is_java: bool) -> tuple[bool, str]:
+    """Inference-time validation (no ground truth)."""
+    if validate.has_conflict_markers(resolution):
         return False, "Output still contained conflict markers (<<<<<<< / ======= / >>>>>>>)."
+    spliced = validate.splice_block(merged, resolution, target_idx)
+    if validate.has_conflict_markers(spliced):
+        return True, ""          # other blocks remain (multi-block) — can't full-parse; resolution is clean
     if is_java:
-        ok, err = validate.syntax_valid(spliced)
-        return ok, err
-    return True, ""          # non-Java: marker-free is the best signal we have
+        return validate.syntax_valid(spliced)
+    return True, ""              # non-Java: marker-free is the best signal we have
 
 
 def resolve(provider: str, s: Scenario, full_versions: dict[str, str]) -> dict:
-    """Run the loop for one scenario. `full_versions` = data.load_full_versions(s).
-
-    Returns a record with per-round candidates + validity and the finalized resolution.
-    """
+    """Run the resolve-or-punt loop for one scenario. Returns a record with the verdict, per-round
+    candidates, and the finalized resolution (target block only)."""
     merged, had_conflict = merge.reconstruct_merged(
         full_versions["base"], full_versions["left"], full_versions["right"]
     )
@@ -46,20 +56,27 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str]) -> dict:
         "provider": provider, "had_conflict": had_conflict, "n_blocks": len(blocks),
     }
     if len(blocks) == 0:
-        return {**base_record, "status": "no_conflict", "rounds": []}
-    if len(blocks) > 1:
-        return {**base_record, "status": "multi_block_unsupported", "rounds": []}
+        return {**base_record, "status": "no_conflict", "target_idx": -1, "rounds": []}
 
-    region = blocks[0]
+    target_idx, overlap = groundtruth.select_target_block(merged, s.conflict_chunk)
+    if target_idx < 0:
+        return {**base_record, "status": "no_conflict", "target_idx": -1, "rounds": []}
+    base_record["target_idx"] = target_idx
+    base_record["target_overlap"] = round(overlap, 3)
+
+    marked = _annotate_target(merged, target_idx)
     rounds: list[dict] = []
     prior_attempt: str | None = None
     validator_error: str | None = None
 
     for r in range(config.MAX_RETRIES + 1):          # round 0 = baseline, then retries
-        out = solver.solve(provider, region, prior_attempt, validator_error)
+        out = solver.solve(provider, marked, prior_attempt, validator_error)
+        if out["verdict"] == "true_conflict":
+            # The model declined to auto-resolve: a Detection event (predicted true conflict).
+            return {**base_record, "status": "punt", "predicted_true_conflict": True,
+                    "rounds": rounds, "n_rounds": len(rounds) + 1}
         resolution = out["resolution"]
-        spliced = validate.splice_resolution(merged, resolution)
-        valid, err = _validate(spliced, s.is_java)
+        valid, err = _validate(resolution, merged, target_idx, s.is_java)
         rounds.append({"round": r, "resolution": resolution, "valid": valid, "error": err})
         if valid:
             break
@@ -68,7 +85,8 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str]) -> dict:
     final = rounds[-1]
     return {
         **base_record,
-        "status": "ok",
+        "status": "resolved",
+        "predicted_true_conflict": False,
         "rounds": rounds,
         "n_rounds": len(rounds),
         "final_resolution": final["resolution"],
