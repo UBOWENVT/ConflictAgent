@@ -77,3 +77,49 @@ def judge_equivalent(candidate: str, developer: str) -> dict:
     raw = llm.call(provider, model, JUDGE_SYSTEM, user)
     acceptable, reason = _parse(raw)
     return {"equivalent": acceptable, "reason": reason, "raw": raw}
+
+
+# --------------------------------------------------------------------------- #
+# Standalone-valid judge: is the resolution sensible on its own, WITHOUT the developer answer?
+# --------------------------------------------------------------------------- #
+# This is the second desirability notion (2026-06-08 redirect): does the candidate look like a
+# reasonable resolution given only base/left/right? The gap between this and developer-match is
+# "resolved correctly, but differently from the developer" — exactly where a semantic judge beats
+# exact-match. This judge never sees the developer's answer.
+
+STANDALONE_SYSTEM = (
+    "You are reviewing a proposed resolution of a Git merge conflict. You are given the conflict in "
+    "diff3 form (BASE = common ancestor, LEFT = one side's change, RIGHT = the other side's change) "
+    "and a CANDIDATE resolution. There is NO reference answer. Decide whether the candidate is a "
+    "reasonable, self-consistent resolution that an experienced engineer could accept: it should "
+    "honor the apparent intent of BOTH sides' changes where they are compatible, not silently drop "
+    "a side's functional change without cause, and be syntactically plausible.\n\n"
+    "ACCEPT if the candidate is a coherent merge of the two changes (or a justified choice of one "
+    "side when the sides are mutually exclusive). Housekeeping differences (whitespace, import set, "
+    "ordering, comments) never make it unacceptable.\n\n"
+    "REJECT as NOT_ACCEPTABLE if the candidate: still contains conflict markers or is a partial/"
+    "unresolved merge; drops a side's functional change for no defensible reason; introduces logic "
+    "absent from both sides; or is syntactically broken.\n\n"
+    "Output exactly two lines and nothing else:\n"
+    "VERDICT: ACCEPTABLE or NOT_ACCEPTABLE\n"
+    "REASON: <one short sentence>"
+)
+
+
+def judge_standalone(candidate: str, left: str, base: str, right: str) -> dict:
+    """Judge a candidate resolution against the conflict itself (no developer answer).
+
+    Return {'equivalent': bool|None, 'reason': str, 'raw': str} — same key as judge_equivalent
+    ('equivalent' == 'standalone-acceptable') so callers share plumbing.
+    """
+    provider, model = config.JUDGE_MODEL
+    user = (
+        "## Conflict (diff3):\n"
+        "<<<<<<< LEFT\n" + (left or "(empty)") +
+        "\n||||||| BASE\n" + (base or "(empty)") +
+        "\n=======\n" + (right or "(empty)") +
+        "\n>>>>>>> RIGHT\n\n## Candidate resolution:\n" + (candidate or "(empty)")
+    )
+    raw = llm.call(provider, model, STANDALONE_SYSTEM, user)
+    acceptable, reason = _parse(raw)
+    return {"equivalent": acceptable, "reason": reason, "raw": raw}

@@ -68,8 +68,12 @@ def call(provider: str, model: str, system: str, user: str, **kwargs) -> str:
     """Send a system + user prompt to *model* on *provider*; return the text.
 
     Validates key existence immediately (no retry). The actual API call is
-    retried on transient errors via `_call_api`.
+    retried on transient errors via `_call_api`. Decoding temperature defaults to
+    config.LLM_TEMPERATURE and is routed to each SDK's correct slot; pass
+    temperature=None to omit it entirely (some OpenAI models reject temperature=0).
     """
+    kwargs.setdefault("temperature", config.LLM_TEMPERATURE)
+
     # Fail fast on missing keys (before any retry loop).
     if provider == "openai":
         _get_openai()
@@ -88,11 +92,17 @@ def call(provider: str, model: str, system: str, user: str, **kwargs) -> str:
     stop=stop_after_attempt(5),
     reraise=True,
 )
-def _call_api(provider: str, model: str, system: str, user: str, **kwargs) -> str:
-    """The actual SDK call, wrapped with tenacity for transient errors."""
+def _call_api(provider: str, model: str, system: str, user: str,
+              temperature: float | None = None, **kwargs) -> str:
+    """The actual SDK call, wrapped with tenacity for transient errors.
+
+    `temperature` is routed to each SDK's correct location and omitted when None.
+    """
 
     if provider == "openai":
         client = _get_openai()
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         resp = client.chat.completions.create(
             model=model,
             messages=[
@@ -105,6 +115,8 @@ def _call_api(provider: str, model: str, system: str, user: str, **kwargs) -> st
 
     elif provider == "anthropic":
         client = _get_anthropic()
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         resp = client.messages.create(
             model=model,
             max_tokens=kwargs.pop("max_tokens", 4096),
@@ -118,6 +130,8 @@ def _call_api(provider: str, model: str, system: str, user: str, **kwargs) -> st
         from google.genai import types  # lazy
 
         client = _get_gemini()
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         resp = client.models.generate_content(
             model=model,
             contents=user,

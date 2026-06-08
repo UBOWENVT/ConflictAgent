@@ -1,22 +1,29 @@
-"""Evaluate LLM merge-conflict resolution on ConflictBench — Detection + Desirability per model.
+"""Evaluate LLM merge-conflict resolution on ConflictBench (2026-06-08 redirect).
 
-For each reconstructable Java scenario x provider:
-  agent.resolve -> a PUNT (the model declares a true conflict) OR a resolution of the annotated
-  target block.
+Result meaning comes from three things, not prompt cleverness:
+  1. a judge calibrated to the human labels (judge v2, scripts/calibrate_judge.py);
+  2. trivial BASELINES (pick-left / pick-right / pick-longer / union) so the LLM's selling point is
+     how far it beats the strongest baseline (developers pick a single side ~57% of the time, so the
+     baseline is strong and must be shown);
+  3. comparability with the 5 merge tools (same desirability notion, same target block).
 
-  DETECTION (no judge): predicted_true = punt; compared to the human 'Valid Conflict' label.
-     precision = punts that are true conflicts / all punts
-     recall    = punts that are true conflicts / all true conflicts
-  This is directly comparable to the 5 merge tools' detection (their punt = 'still conflict').
+Per reconstructable Java scenario x provider, under --scheme A or B:
+  agent.resolve -> a resolution of the annotated target block (scheme B may instead PUNT).
 
-  DESIRABILITY (calibrated judge v2, only on PRODUCED resolutions): judge the LLM resolution vs the
-  developer's resolution of the SAME target block, extracted from the child FILE so the two are
-  span-consistent. Scored only when the developer region extracts cleanly ('ok').
+  DETECTION (scheme B only): predicted_true = punt, vs the human 'Valid Conflict' label
+     (precision/recall) — comparable to the tools' 'still conflict'.
+  CONFIDENCE CALIBRATION (both schemes): desirability rate bucketed by the model's self-reported
+     confidence — does low confidence track low desirability?
+  DESIRABILITY, two notions, both judged by the calibrated judge on the SAME target block:
+     - developer-match: candidate vs the developer's resolution (child file, span-consistent);
+     - standalone-valid: candidate vs the conflict itself (base/left/right), no reference answer.
+     The gap between them = "resolved correctly but differently from the developer".
 
-Everything stratified by Valid Conflict (true / false). Incremental JSONL + per-model summary.
+Trivial baselines are judged once per scenario (provider-independent). Everything stratified by
+Valid Conflict. Incremental JSONL + per-model summary.
 
-Run:  python scripts/run_eval.py --providers openai gemini            # all Java scenarios
-      python scripts/run_eval.py --providers openai --limit 10        # quick smoke
+Run:  python scripts/run_eval.py --scheme A --providers openai gemini      # all Java scenarios
+      python scripts/run_eval.py --scheme A --providers openai --limit 10  # quick smoke
 """
 from __future__ import annotations
 
@@ -24,26 +31,81 @@ import argparse
 import json
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conflictagent import config, data, agent, groundtruth, judge, merge  # noqa: E402
+from conflictagent import config, data, agent, groundtruth, judge, merge, validate  # noqa: E402
+
+BASELINES = ("pick-left", "pick-right", "pick-longer", "union")
+CONF_BUCKETS = ("high", "medium", "low", "")   # "" = model gave no/unparsed confidence
 
 
-def _new_stats() -> dict:
+def _nonblank(text: str) -> int:
+    return sum(1 for l in (text or "").splitlines() if l.strip())
+
+
+def _build_baselines(left: str, base: str, right: str) -> dict[str, str]:
+    longer = left if _nonblank(left) >= _nonblank(right) else right
+    union = (left + "\n" + right) if (left and right) else (left or right)
+    return {"pick-left": left, "pick-right": right, "pick-longer": longer, "union": union}
+
+
+def _judge_pair(kind: str, candidate: str, dev_region: str | None,
+                left: str, base: str, right: str) -> bool | None:
+    """kind='dev' -> developer-match (needs dev_region); kind='std' -> standalone-valid."""
+    try:
+        if kind == "dev":
+            if dev_region is None:
+                return None
+            return judge.judge_equivalent(candidate, dev_region)["equivalent"]
+        return judge.judge_standalone(candidate, left, base, right)["equivalent"]
+    except Exception:
+        return None
+
+
+def _prov_stats() -> dict:
+    by_vc = lambda: {True: {"j": 0, "a": 0}, False: {"j": 0, "a": 0}}  # noqa: E731
+    by_conf = lambda: {c: {"j": 0, "a": 0} for c in CONF_BUCKETS}      # noqa: E731
     return {
-        "det": {"n": 0, "punt": 0, "punt_true": 0, "true_total": 0},
-        "des": {"judged": 0, "acceptable": 0,
-                "by_vc": {True: {"j": 0, "a": 0}, False: {"j": 0, "a": 0}}},
-        "errors": 0,
+        "det": {"punt": 0, "punt_true": 0, "true_total": 0},
+        "dev": {"j": 0, "a": 0, "by_vc": by_vc(), "by_conf": by_conf()},
+        "std": {"j": 0, "a": 0, "by_vc": by_vc(), "by_conf": by_conf()},
+        "resolved": 0, "punt": 0, "errors": 0,
     }
+
+
+def _base_stats() -> dict:
+    by_vc = lambda: {True: {"j": 0, "a": 0}, False: {"j": 0, "a": 0}}  # noqa: E731
+    return {n: {"dev": {"j": 0, "a": 0, "by_vc": by_vc()},
+                "std": {"j": 0, "a": 0, "by_vc": by_vc()}} for n in BASELINES}
+
+
+def _acc(rec_kind: dict, vc: bool | None, acc: bool | None, conf: str | None = None) -> None:
+    """Accumulate one judged outcome into a {'j','a','by_vc'[,'by_conf']} bucket set."""
+    if acc is None:
+        return
+    rec_kind["j"] += 1
+    rec_kind["a"] += int(acc)
+    if vc is not None:
+        b = rec_kind["by_vc"][bool(vc)]
+        b["j"] += 1
+        b["a"] += int(acc)
+    if conf is not None and "by_conf" in rec_kind:
+        c = rec_kind["by_conf"].get(conf if conf in CONF_BUCKETS else "")
+        c["j"] += 1
+        c["a"] += int(acc)
+
+
+def _rate(b: dict) -> str:
+    return f"{b['a']}/{b['j']} = {(b['a']/b['j'] if b['j'] else 0.0):.1%}"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--scheme", choices=config.SCHEMES, default=config.DEFAULT_SCHEME)
     ap.add_argument("--providers", nargs="+", default=["openai", "gemini"])
     ap.add_argument("--limit", type=int, default=0, help="0 = all reconstructable Java scenarios")
+    ap.add_argument("--no-baselines", action="store_true", help="skip trivial baselines (saves judge calls)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -56,81 +118,119 @@ def main() -> None:
         usable = usable[: args.limit]
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_path = Path(args.out) if args.out else config.OUTPUT_DIR / "eval" / f"eval_{stamp}.jsonl"
+    out_path = Path(args.out) if args.out else config.OUTPUT_DIR / "eval" / f"eval_{args.scheme}_{stamp}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    stats = {p: _new_stats() for p in args.providers}
-    print(f"Evaluating {len(usable)} Java scenarios x {args.providers} "
-          f"(judge={config.JUDGE_MODEL[1]})")
+    pstats = {p: _prov_stats() for p in args.providers}
+    bstats = _base_stats()
+    print(f"Evaluating {len(usable)} Java scenarios x {args.providers} | scheme={args.scheme} "
+          f"| judge={config.JUDGE_MODEL[1]} | baselines={'off' if args.no_baselines else 'on'}")
 
     with open(out_path, "w", encoding="utf-8") as fh:
-        for s, fv in usable:
-            # Developer's resolution of the target block (span-consistent ground truth), once.
-            merged, _ = merge.reconstruct_merged(fv["base"], fv["left"], fv["right"])
-            tgt, _ = groundtruth.select_target_block(merged, s.conflict_chunk)
-            dev_region, dev_status = (None, "no_block")
-            if tgt >= 0 and "child" in fv:
-                dev_region, dev_status = groundtruth.resolution_region(fv["child"], merged, tgt)
+        def emit(obj: dict) -> None:
+            fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            fh.flush()
 
+        for s, fv in usable:
+            merged, _ = merge.reconstruct_merged(fv["base"], fv["left"], fv["right"])
+            blocks = validate.conflict_blocks(merged)
+            tgt, _ = groundtruth.select_target_block(merged, s.conflict_chunk)
+
+            dev_region, dev_status = (None, "no_block")
+            left = base = right = ""
+            if tgt >= 0 and tgt < len(blocks):
+                left, base, right = validate.split_diff3_block(blocks[tgt])
+                if "child" in fv:
+                    dev_region, dev_status = groundtruth.resolution_region(fv["child"], merged, tgt)
+
+            # --- Trivial baselines (provider-independent; judged once) ---
+            if not args.no_baselines and tgt >= 0:
+                for name, cand in _build_baselines(left, base, right).items():
+                    dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
+                                     left, base, right)
+                    sv = _judge_pair("std", cand, None, left, base, right)
+                    _acc(bstats[name]["dev"], s.valid_conflict, dm)
+                    _acc(bstats[name]["std"], s.valid_conflict, sv)
+                    emit({"kind": "baseline", "id": s.id, "baseline": name,
+                          "valid_conflict": s.valid_conflict, "dev_status": dev_status,
+                          "dev_match": dm, "standalone": sv})
+
+            # --- LLM, per provider ---
             for p in args.providers:
-                st = stats[p]
+                st = pstats[p]
                 try:
-                    rec = agent.resolve(p, s, fv)
+                    rec = agent.resolve(p, s, fv, scheme=args.scheme)
                 except Exception as e:
                     st["errors"] += 1
-                    fh.write(json.dumps({"id": s.id, "provider": p, "error": repr(e)}) + "\n")
-                    fh.flush()
+                    emit({"kind": "llm", "id": s.id, "provider": p, "scheme": args.scheme,
+                          "error": repr(e)})
                     continue
 
-                # --- Detection ---
-                st["det"]["n"] += 1
-                if s.valid_conflict:
-                    st["det"]["true_total"] += 1
                 punt = bool(rec.get("predicted_true_conflict", False))
-                if punt:
-                    st["det"]["punt"] += 1
+                if args.scheme == "B":
                     if s.valid_conflict:
-                        st["det"]["punt_true"] += 1
+                        st["det"]["true_total"] += 1
+                    if punt:
+                        st["det"]["punt"] += 1
+                        if s.valid_conflict:
+                            st["det"]["punt_true"] += 1
 
-                # --- Desirability (only for produced resolutions + clean developer region) ---
-                desirable = None
-                if rec["status"] == "resolved" and dev_status == "ok" and dev_region is not None:
-                    try:
-                        acc = judge.judge_equivalent(rec["final_resolution"], dev_region)["equivalent"]
-                    except Exception:
-                        acc = None
-                    if acc is not None:
-                        st["des"]["judged"] += 1
-                        st["des"]["acceptable"] += int(acc)
-                        b = st["des"]["by_vc"][bool(s.valid_conflict)]
-                        b["j"] += 1
-                        b["a"] += int(acc)
-                        desirable = acc
+                dm = sv = None
+                conf = rec.get("confidence", "")
+                if rec["status"] == "resolved":
+                    st["resolved"] += 1
+                    cand = rec["final_resolution"]
+                    dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
+                                     left, base, right)
+                    sv = _judge_pair("std", cand, None, left, base, right)
+                    _acc(st["dev"], s.valid_conflict, dm, conf)
+                    _acc(st["std"], s.valid_conflict, sv, conf)
+                elif punt:
+                    st["punt"] += 1
 
-                fh.write(json.dumps({
-                    "id": s.id, "provider": p, "valid_conflict": s.valid_conflict,
-                    "status": rec["status"], "punt": punt, "n_blocks": rec.get("n_blocks"),
-                    "dev_status": dev_status, "desirable": desirable,
-                    "final_valid": rec.get("final_valid"),
-                }, ensure_ascii=False) + "\n")
-                fh.flush()
+                emit({"kind": "llm", "id": s.id, "provider": p, "scheme": args.scheme,
+                      "valid_conflict": s.valid_conflict, "status": rec["status"], "punt": punt,
+                      "n_blocks": rec.get("n_blocks"), "confidence": conf,
+                      "strategy": rec.get("strategy", ""), "dev_status": dev_status,
+                      "dev_match": dm, "standalone": sv, "final_valid": rec.get("final_valid")})
 
-    # --- summary ---
+    _summary(args, pstats, bstats, out_path)
+
+
+def _summary(args, pstats: dict, bstats: dict, out_path: Path) -> None:
     for p in args.providers:
-        d, de = stats[p]["det"], stats[p]["des"]
-        prec = d["punt_true"] / d["punt"] if d["punt"] else 0.0
-        rec_ = d["punt_true"] / d["true_total"] if d["true_total"] else 0.0
-        des_rate = de["acceptable"] / de["judged"] if de["judged"] else 0.0
-        print(f"\n=== {p} ===")
-        print(f"  scenarios: {d['n']}   errors: {stats[p]['errors']}")
-        print(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} true conflicts")
-        print(f"    precision={prec:.1%}  recall={rec_:.1%}")
-        print(f"  DESIRABILITY (produced resolutions, judged vs developer): judged={de['judged']}")
-        print(f"    acceptable rate={des_rate:.1%}")
-        for vc, lab in [(False, "false/resolvable"), (True, "true conflict")]:
-            b = de["by_vc"][vc]
-            r = b["a"] / b["j"] if b["j"] else 0.0
-            print(f"      {lab}: {b['a']}/{b['j']} = {r:.1%}")
+        st = pstats[p]
+        print(f"\n=== {p}  (scheme {args.scheme}) ===")
+        print(f"  resolved: {st['resolved']}   punts: {st['punt']}   errors: {st['errors']}")
+        if args.scheme == "B":
+            d = st["det"]
+            prec = d["punt_true"] / d["punt"] if d["punt"] else 0.0
+            recl = d["punt_true"] / d["true_total"] if d["true_total"] else 0.0
+            print(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} "
+                  f"true conflicts -> precision={prec:.1%} recall={recl:.1%}")
+        for kind, label in (("dev", "DESIRABILITY developer-match"),
+                            ("std", "DESIRABILITY standalone-valid")):
+            k = st[kind]
+            print(f"  {label}: {_rate(k)}")
+            print(f"      true conflict : {_rate(k['by_vc'][True])}")
+            print(f"      resolvable    : {_rate(k['by_vc'][False])}")
+        print("  CONFIDENCE CALIBRATION (developer-match rate by self-reported confidence):")
+        for c in ("high", "medium", "low", ""):
+            b = st["dev"]["by_conf"][c]
+            if b["j"]:
+                print(f"      {c or '(none)':<7}: {_rate(b)}")
+
+    if not args.no_baselines:
+        print("\n=== TRIVIAL BASELINES (provider-independent; the bar the LLM must clear) ===")
+        for name in BASELINES:
+            bs = bstats[name]
+            print(f"  {name:<11} dev-match {_rate(bs['dev'])} | standalone {_rate(bs['std'])}")
+        best = max(BASELINES, key=lambda n: (bstats[n]['dev']['a'] / bstats[n]['dev']['j'])
+                   if bstats[n]['dev']['j'] else 0.0)
+        bd = bstats[best]['dev']
+        print(f"  strongest baseline (dev-match): {best} = "
+              f"{(bd['a']/bd['j'] if bd['j'] else 0.0):.1%}")
+
     print(f"\nRecords -> {out_path}")
 
 
