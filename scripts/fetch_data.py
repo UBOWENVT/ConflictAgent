@@ -1,11 +1,13 @@
 """Pull ConflictBench data into ./data (gitignored).
 
   1. ConflictBench.xlsx -> data/  (snippets + labels + developer ground truth)
-  2. Per-scenario full files (base/left/right/child) -> data/scenarios/{project}__{commit}/{ver}
-     for every scenario whose conflict File Name exists in base+left+right (157/180; the rest
-     are add/delete/rename cases that can't be 3-way reconstructed at the file level).
+  2. Per-scenario resolved files -> data/scenarios/{project}__{commit}/{ver}
+     base/left/right/child plus the 5 merge tools' outputs (FSTMerge/IntelliMerge/AutoMerge/
+     JDime/KDiff3) where present. Fetched for every scenario whose conflict File Name exists in
+     base+left+right (157/180; the rest are add/delete/rename cases).
 
-The full files feed merge.reconstruct_merged() + validate.syntax_valid().
+These feed merge.reconstruct_merged(), validate.syntax_valid(), and groundtruth.resolution_region()
+(developer = child; each tool = its own folder; judge calibration compares tool vs child).
 
 Run:  python scripts/fetch_data.py             # xlsx + all reconstructable scenarios
       python scripts/fetch_data.py --limit 5   # quick: xlsx + first 5 scenarios
@@ -24,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conflictagent import config  # noqa: E402
 
 VERS = ("base", "left", "right", "child")
+TOOLS = ("FSTMerge", "IntelliMerge", "AutoMerge", "JDime", "KDiff3")  # optional per scenario
 _TREE_API = "https://api.github.com/repos/UBOWENVT/ConflictBench/git/trees/master?recursive=1"
 
 
@@ -63,14 +66,14 @@ def fetch_scenarios(limit: int | None = None) -> None:
     for s in data.load_scenarios():
         repo_paths = {
             ver: f"Resource/merge_scenarios/{s.project}/{s.commit}/{ver}/{s.file_name}"
-            for ver in VERS
+            for ver in VERS + TOOLS
         }
         if not all(repo_paths[v] in blobs for v in ("base", "left", "right")):
             skipped += 1
             continue
         sdir = out_dir / f"{s.project}__{s.commit}"
         sdir.mkdir(parents=True, exist_ok=True)
-        for ver in VERS:
+        for ver in VERS + TOOLS:
             if repo_paths[ver] not in blobs:
                 continue
             dst = sdir / ver
