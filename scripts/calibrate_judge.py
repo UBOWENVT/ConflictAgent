@@ -1,9 +1,15 @@
-"""Calibrate the LLM-as-judge against ConflictBench's manual desirability labels.
+"""Calibrate the LLM judge against ConflictBench's manual desirability labels.
 
-Trust check before the judge is used for headline numbers: run judge.judge_equivalent on the
-manual (tool resolution, developer, desirable 0/1) triples and measure agreement with the human
-labels (accuracy / precision / recall, treating the human label as ground truth). High agreement
-=> the automated judge is defensible.
+For each labeled (scenario, tool) pair, build a (tool_resolution, developer_resolution) pair to
+judge, PREFERRING the real resolved files and falling back to cleaned xlsx snippets:
+
+  1. select the annotated conflict block via the xlsx MERGED snippet (not blindly block #0)
+  2. if both the tool's file and the child file extract that block cleanly (anchors unique) ->
+     use those file regions (same git-block span; consistent)
+  3. otherwise -> fall back to cleaned xlsx snippets for BOTH sides (same human span; consistent)
+
+Then judge equivalence and compare to the human label (accuracy / precision / recall). The per-pair
+`source` (file vs xlsx-fallback) is recorded so we can see how often each path is taken.
 
 Run:  python scripts/calibrate_judge.py --limit 100   # cheap first pass
       python scripts/calibrate_judge.py                # all ~627 labels
@@ -17,7 +23,30 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conflictagent import config, data, judge  # noqa: E402
+from conflictagent import config, data, groundtruth, judge, merge  # noqa: E402
+
+
+def build_pair(lab: data.ManualLabel) -> tuple[str, str, str]:
+    """Return (candidate, developer, source). source in {'file','xlsx'}.
+
+    Prefer real-file region extraction; fall back to cleaned xlsx snippets when the files are
+    missing or the anchors aren't unique. Both sides always come from the SAME source, so the
+    pair is span-consistent.
+    """
+    files = data.load_scenario_files(lab.project, lab.commit)
+    if {"base", "left", "right"} <= files.keys():
+        merged, _ = merge.reconstruct_merged(files["base"], files["left"], files["right"])
+        idx, _ = groundtruth.select_target_block(merged, lab.merged_snippet)
+        tool_file = files.get(data.tool_folder(lab.tool))
+        child_file = files.get("child")
+        if idx >= 0 and tool_file is not None and child_file is not None:
+            tool_region, st_t = groundtruth.resolution_region(tool_file, merged, idx)
+            dev_region, st_d = groundtruth.resolution_region(child_file, merged, idx)
+            if st_t == "ok" and st_d == "ok":
+                return tool_region, dev_region, "file"
+    # fallback: cleaned xlsx snippets (both sides at the human annotation span)
+    return (data.clean_xlsx_snippet(lab.tool_resolution),
+            data.clean_xlsx_snippet(lab.developer), "xlsx")
 
 
 def main() -> None:
@@ -35,24 +64,27 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     tp = fp = tn = fn = skipped = unparsed = 0
+    src = {"file": 0, "xlsx": 0}
     print(f"Calibrating judge ({config.JUDGE_MODEL[1]}) on {len(labels)} labels")
     with open(out_path, "w", encoding="utf-8") as fh:
-        for i, lab in enumerate(labels):
-            if not lab.tool_resolution.strip():      # tool produced no resolution to judge
-                skipped += 1
+        for lab in labels:
+            cand, dev, source = build_pair(lab)
+            if source == "xlsx" and (not cand.strip() or not dev.strip()):
+                skipped += 1  # genuinely-missing xlsx fallback (file path may have empty=deletion)
                 continue
             try:
-                v = judge.judge_equivalent(lab.tool_resolution, lab.developer)
+                v = judge.judge_equivalent(cand, dev)
                 eq = v["equivalent"]
             except Exception as e:
                 eq, v = None, {"error": repr(e)}
-            rec = {"project": lab.project, "tool": lab.tool, "manual": lab.desirable,
-                   "judge": eq, "reason": v.get("reason", "")}
+            rec = {"project": lab.project, "tool": lab.tool, "source": source,
+                   "manual": lab.desirable, "judge": eq, "reason": v.get("reason", "")}
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()
             if eq is None:
                 unparsed += 1
                 continue
+            src[source] += 1
             if eq and lab.desirable:
                 tp += 1
             elif eq and not lab.desirable:
@@ -68,6 +100,7 @@ def main() -> None:
     rec_ = tp / (tp + fn) if (tp + fn) else 0.0
     print("\n=== judge vs human (human label = ground truth) ===")
     print(f"  judged: {n}   skipped(empty): {skipped}   unparsed: {unparsed}")
+    print(f"  source: file={src['file']}  xlsx-fallback={src['xlsx']}")
     print(f"  TP={tp}  FP={fp}  TN={tn}  FN={fn}")
     print(f"  accuracy={acc:.1%}  precision={prec:.1%}  recall={rec_:.1%}")
     print(f"\nRecords -> {out_path}")
