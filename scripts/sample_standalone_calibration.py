@@ -121,34 +121,45 @@ def score(args) -> None:
         if mid and mv:
             human[mid.group(1)] = mv.group(1).lower() in ("yes", "y", "true")
 
-    tp = fp = tn = fn = 0
-    disagree = []
-    n = 0
+    rows = []  # (cid, judge, human, valid_conflict, reason)
     for cid, h in human.items():
         if cid not in krows:
             continue
         j = krows[cid]["judge_verdict"]
         if j is None:
             continue
-        n += 1
-        if j and h: tp += 1
-        elif j and not h: fp += 1
-        elif not j and not h: tn += 1
-        else: fn += 1
-        if j != h:
-            disagree.append((cid, f"judge={j} human={h}", krows[cid].get("judge_reason", "")))
+        rows.append((cid, j, h, bool(krows[cid].get("valid_conflict")),
+                     krows[cid].get("judge_reason", "")))
 
-    acc = (tp + tn) / n if n else 0.0
-    prec = tp / (tp + fp) if (tp + fp) else 0.0
-    rec = tp / (tp + fn) if (tp + fn) else 0.0
-    print(f"Labeled & keyed: {n}")
-    print(f"  agreement(acc) = {acc:.1%}   precision = {prec:.1%}   recall = {rec:.1%}")
-    print(f"  confusion: judge-accept&human-accept={tp}  judge-accept&human-reject={fp}  "
-          f"judge-reject&human-reject={tn}  judge-reject&human-accept={fn}")
+    def _block(label: str, subset: list) -> None:
+        n = len(subset)
+        if not n:
+            print(f"\n[{label}]  (no items)")
+            return
+        tp = sum(1 for _, j, h, _, _ in subset if j and h)
+        fp = sum(1 for _, j, h, _, _ in subset if j and not h)
+        tn = sum(1 for _, j, h, _, _ in subset if not j and not h)
+        fn = sum(1 for _, j, h, _, _ in subset if not j and h)
+        acc = (tp + tn) / n
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        print(f"\n[{label}]  n={n}")
+        print(f"  agreement(acc) = {acc:.1%}   precision = {prec:.1%}   recall = {rec:.1%}")
+        print(f"  confusion: judge+/human+={tp}  judge+/human-={fp}  "
+              f"judge-/human-={tn}  judge-/human+={fn}")
+
+    _block("ALL", rows)
+    _block("FALSE conflicts — standalone is meaningful (objective merge exists)",
+           [r for r in rows if not r[3]])
+    _block("TRUE conflicts — standalone ill-posed, interpret with caution (use developer-match)",
+           [r for r in rows if r[3]])
+
+    disagree = [(cid, f"judge={j} human={h}", "vc=" + str(vc), reason)
+                for cid, j, h, vc, reason in rows if j != h]
     if disagree:
         print("\nDisagreements (drive the prompt fix):")
-        for cid, d, why in disagree:
-            print(f"  {cid:30s} {d}  judge_reason: {why}")
+        for cid, d, vc, why in disagree:
+            print(f"  {cid:30s} {d} {vc}  judge_reason: {why}")
 
 
 def main() -> None:
