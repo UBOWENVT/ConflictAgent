@@ -17,6 +17,9 @@ Per reconstructable Java scenario x provider, under --scheme A or B:
   DESIRABILITY, two notions, both judged by the calibrated judge on the SAME target block:
      - developer-match: candidate vs the developer's resolution (child file, span-consistent);
      - standalone-valid: candidate vs the conflict itself (base/left/right), no reference answer.
+       MEANINGFUL ONLY for false conflicts (an objective merge exists; calibrated acc 85% /
+       precision 88% on 40 hand labels). Ill-posed for true conflicts (no context-free correct
+       answer) -> developer-match is the primary metric there.
      The gap between them = "resolved correctly but differently from the developer".
 
 Trivial baselines are judged once per scenario (provider-independent). Everything stratified by
@@ -210,12 +213,19 @@ def _summary(args, pstats: dict, bstats: dict, out_path: Path) -> None:
             recl = d["punt_true"] / d["true_total"] if d["true_total"] else 0.0
             print(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} "
                   f"true conflicts -> precision={prec:.1%} recall={recl:.1%}")
-        for kind, label in (("dev", "DESIRABILITY developer-match"),
-                            ("std", "DESIRABILITY standalone-valid")):
-            k = st[kind]
-            print(f"  {label}: {_rate(k)}")
-            print(f"      true conflict : {_rate(k['by_vc'][True])}")
-            print(f"      resolvable    : {_rate(k['by_vc'][False])}")
+        # PRIMARY metric: developer-match (calibrated judge v2), valid across all scenarios.
+        dev = st["dev"]
+        print(f"  DESIRABILITY developer-match  [PRIMARY, calibrated judge v2]: {_rate(dev)}")
+        print(f"      true conflict : {_rate(dev['by_vc'][True])}")
+        print(f"      false conflict: {_rate(dev['by_vc'][False])}")
+        # standalone-valid is a correctness measure ONLY on false conflicts (an objective merge
+        # exists); calibrated there at acc 85% / prec 88% (40 hand labels). On true conflicts it is
+        # ill-posed (no context-free correct answer) -> reference only, NOT a correctness measure.
+        std = st["std"]
+        print(f"  DESIRABILITY standalone-valid [false conflicts only; calib acc 85%/prec 88%]: "
+              f"{_rate(std['by_vc'][False])}")
+        print(f"      true conflict (ill-posed, reference only — use developer-match): "
+              f"{_rate(std['by_vc'][True])}")
         print("  CONFIDENCE CALIBRATION (developer-match rate by self-reported confidence):")
         for c in ("high", "medium", "low", ""):
             b = st["dev"]["by_conf"][c]

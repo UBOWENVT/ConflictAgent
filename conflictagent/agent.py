@@ -41,7 +41,17 @@ def _validate(resolution: str, merged: str, target_idx: int, is_java: bool) -> t
     if validate.has_conflict_markers(spliced):
         return True, ""          # other blocks remain (multi-block) — can't full-parse; resolution is clean
     if is_java:
-        return validate.syntax_valid(spliced)
+        ok, err = validate.syntax_valid(spliced)
+        if not ok:
+            return False, err
+        dup, what = validate.has_duplicate_declarations(spliced)
+        if dup:
+            return False, (
+                f"Your output included code from OUTSIDE the conflict region ({what}). "
+                f"Output ONLY the replacement for the tagged <<<<<<< … >>>>>>> region — "
+                f"nothing before the <<<<<<< line or after the >>>>>>> line."
+            )
+        return True, ""
     return True, ""              # non-Java: marker-free is the best signal we have
 
 
