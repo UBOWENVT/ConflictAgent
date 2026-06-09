@@ -4,8 +4,9 @@ Single entry point: `call(provider, model, system, user) -> str` so that
 solver/judge code stays provider-agnostic. SDK imports are lazy (inside function
 bodies) — the module itself imports without any SDK installed.
 
-Wraps with tenacity retry for transient / rate-limit errors. Key-validation
-errors are raised immediately without retry.
+Wraps with tenacity retry (8 attempts, exponential backoff to 60s, each backoff
+logged) for transient server / rate-limit errors such as Gemini 503 "high demand"
+spikes. Key-validation errors are raised immediately in call() without retry.
 
 Gemini uses the current `google-genai` SDK (`from google import genai`).
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import logging
 
 from tenacity import (
+    before_sleep_log,
     retry,
     stop_after_attempt,
     wait_exponential,
@@ -89,7 +91,8 @@ def call(provider: str, model: str, system: str, user: str, **kwargs) -> str:
 
 @retry(
     wait=wait_exponential(min=2, max=60),
-    stop=stop_after_attempt(5),
+    stop=stop_after_attempt(8),                           # ride out sustained 503/overload spikes
+    before_sleep=before_sleep_log(log, logging.WARNING),  # log each backoff so spikes are visible
     reraise=True,
 )
 def _call_api(provider: str, model: str, system: str, user: str,
