@@ -7,6 +7,7 @@ signals the loop may use to decide whether to retry:
   - extract_conflict_region(merged) -> the first <<<<<<< ... >>>>>>> block (solver input)
   - splice_resolution(merged, res)  -> put the candidate back where the conflict was
   - syntax_valid(java_text)         -> (ok, error) via javalang  [Java only]
+  - has_duplicate_declarations(java_text) -> over-scoped/duplicated decls javalang misses [Java]
 
 The full merged file (with markers) comes from merge.reconstruct_merged(); splicing the
 candidate into it and parsing gives the syntax-valid signal. Tested on real ConflictBench
@@ -116,3 +117,58 @@ def syntax_valid(java_text: str) -> tuple[bool, str]:
         at = getattr(e, "at", None)
         loc = f" (at {at})" if at else ""
         return False, f"{desc}{loc}"
+
+
+def has_duplicate_declarations(java_text: str) -> tuple[bool, str]:
+    """Detect declarations duplicated by an OVER-SCOPED resolution. Return (has_dup, message).
+
+    The solver sometimes emits code from outside the tagged conflict region — e.g. when the
+    block boundary falls mid-construct, it 'completes' a class/method it was only shown as
+    context. Splicing that back duplicates a type or method that still exists elsewhere in the
+    file: a COMPILE error that javalang's syntax parse does NOT flag (so syntax_valid passes).
+    This closes that gap. Non-parseable input -> (False, '') because syntax_valid is the gate
+    for syntax; overloads (same name, different parameter types) are NOT duplicates.
+    """
+    import javalang  # lazy
+
+    try:
+        tree = javalang.parse.parse(java_text)
+    except Exception:
+        return False, ""
+
+    _TYPES = ("ClassDeclaration", "InterfaceDeclaration", "EnumDeclaration", "AnnotationDeclaration")
+    _METHODS = ("MethodDeclaration", "ConstructorDeclaration")
+
+    def _sig(member) -> tuple:
+        return (member.name,
+                tuple((getattr(p.type, "name", None), getattr(p, "varargs", False))
+                      for p in (member.parameters or [])))
+
+    def _walk(type_decl, path: str) -> str | None:
+        seen_types: set[str] = set()
+        seen_methods: set[tuple] = set()
+        for m in getattr(type_decl, "body", None) or []:
+            kind = type(m).__name__
+            if kind in _TYPES:
+                if m.name in seen_types:
+                    return f"duplicate nested type {path}.{m.name}"
+                seen_types.add(m.name)
+                sub = _walk(m, f"{path}.{m.name}")
+                if sub:
+                    return sub
+            elif kind in _METHODS:
+                sig = _sig(m)
+                if sig in seen_methods:
+                    return f"duplicate method {path}.{m.name}"
+                seen_methods.add(sig)
+        return None
+
+    top: set[str] = set()
+    for td in tree.types or []:
+        if td.name in top:
+            return True, f"duplicate top-level type {td.name}"
+        top.add(td.name)
+        msg = _walk(td, td.name)
+        if msg:
+            return True, msg
+    return False, ""
