@@ -126,13 +126,25 @@ def main() -> None:
 
     pstats = {p: _prov_stats() for p in args.providers}
     bstats = _base_stats()
+    timing = {"solve": 0.0, "judge": 0.0, "base_judge": 0.0,
+              "rounds": {p: {} for p in args.providers}}  # rounds[p][n_rounds] = scenario count
     print(f"Evaluating {len(usable)} Java scenarios x {args.providers} | scheme={args.scheme} "
           f"| judge={config.JUDGE_MODEL[1]} | baselines={'off' if args.no_baselines else 'on'}")
 
-    with open(out_path, "w", encoding="utf-8") as fh:
+    timing_path = out_path.with_suffix(".timing.csv")
+    with open(out_path, "w", encoding="utf-8") as fh, \
+            open(timing_path, "w", encoding="utf-8") as tf:
+        tf.write("idx,id,provider,status,n_rounds,final_valid,solve_secs,judge_secs\n")
+
         def emit(obj: dict) -> None:
             fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
             fh.flush()
+
+        def log_timing(idx, sid, provider, status, n_rounds, final_valid,
+                       solve_s, judge_s) -> None:
+            tf.write(f"{idx},{sid},{provider},{status},{n_rounds},{final_valid},"
+                     f"{solve_s:.2f},{judge_s:.2f}\n")
+            tf.flush()
 
         n_total = len(usable)
         for idx, (s, fv) in enumerate(usable, 1):
@@ -150,6 +162,7 @@ def main() -> None:
 
             # --- Trivial baselines (provider-independent; judged once) ---
             if not args.no_baselines and tgt >= 0:
+                _bt = time.perf_counter()
                 for name, cand in _build_baselines(left, base, right).items():
                     dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
                                      left, base, right)
@@ -159,17 +172,28 @@ def main() -> None:
                     emit({"kind": "baseline", "id": s.id, "baseline": name,
                           "valid_conflict": s.valid_conflict, "dev_status": dev_status,
                           "dev_match": dm, "standalone": sv})
+                _bsecs = time.perf_counter() - _bt
+                timing["base_judge"] += _bsecs
+                log_timing(idx, s.id, "(baselines)", "judged", 0, "", 0.0, _bsecs)
 
             # --- LLM, per provider ---
             for p in args.providers:
                 st = pstats[p]
+                _t0 = time.perf_counter()
                 try:
                     rec = agent.resolve(p, s, fv, scheme=args.scheme)
                 except Exception as e:
                     st["errors"] += 1
+                    _se = time.perf_counter() - _t0
+                    timing["solve"] += _se
+                    log_timing(idx, s.id, p, "error", 0, "", _se, 0.0)
                     emit({"kind": "llm", "id": s.id, "provider": p, "scheme": args.scheme,
                           "error": repr(e)})
                     continue
+                solve_s = time.perf_counter() - _t0
+                timing["solve"] += solve_s
+                nr = rec.get("n_rounds", 0)
+                timing["rounds"][p][nr] = timing["rounds"][p].get(nr, 0) + 1
 
                 punt = bool(rec.get("predicted_true_conflict", False))
                 if args.scheme == "B":
@@ -182,6 +206,7 @@ def main() -> None:
 
                 dm = sv = None
                 conf = rec.get("confidence", "")
+                _j0 = time.perf_counter()
                 if rec["status"] == "resolved":
                     st["resolved"] += 1
                     cand = rec["final_resolution"]
@@ -192,17 +217,21 @@ def main() -> None:
                     _acc(st["std"], s.valid_conflict, sv, conf)
                 elif punt:
                     st["punt"] += 1
+                judge_s = time.perf_counter() - _j0
+                timing["judge"] += judge_s
+                log_timing(idx, s.id, p, rec["status"], nr, rec.get("final_valid"),
+                           solve_s, judge_s)
 
                 emit({"kind": "llm", "id": s.id, "provider": p, "scheme": args.scheme,
                       "valid_conflict": s.valid_conflict, "status": rec["status"], "punt": punt,
-                      "n_blocks": rec.get("n_blocks"), "confidence": conf,
+                      "n_blocks": rec.get("n_blocks"), "n_rounds": nr, "confidence": conf,
                       "strategy": rec.get("strategy", ""), "dev_status": dev_status,
                       "dev_match": dm, "standalone": sv, "final_valid": rec.get("final_valid")})
 
-    _summary(args, pstats, bstats, out_path)
+    _summary(args, pstats, bstats, out_path, timing)
 
 
-def _summary(args, pstats: dict, bstats: dict, out_path: Path) -> None:
+def _summary(args, pstats: dict, bstats: dict, out_path: Path, timing: dict | None = None) -> None:
     for p in args.providers:
         st = pstats[p]
         print(f"\n=== {p}  (scheme {args.scheme}) ===")
@@ -242,6 +271,18 @@ def _summary(args, pstats: dict, bstats: dict, out_path: Path) -> None:
         bd = bstats[best]['dev']
         print(f"  strongest baseline (dev-match): {best} = "
               f"{(bd['a']/bd['j'] if bd['j'] else 0.0):.1%}")
+
+    if timing:
+        print("\n=== TIMING / RETRIES (diagnostic) ===")
+        print(f"  total solver={timing['solve']:.0f}s  judge(llm)={timing['judge']:.0f}s  "
+              f"judge(baselines)={timing['base_judge']:.0f}s")
+        for p in args.providers:
+            dist = timing["rounds"].get(p, {})
+            n = sum(dist.values()) or 1
+            avg = sum(k * v for k, v in dist.items()) / n
+            order = "  ".join(f"{k}x{dist[k]}" for k in sorted(dist))
+            print(f"  {p}: avg solver attempts={avg:.2f}  [attempts x scenarios: {order}]")
+        print(f"  per-scenario CSV -> {out_path.with_suffix('.timing.csv')}")
 
     print(f"\nRecords -> {out_path}")
 
