@@ -90,7 +90,8 @@ def main() -> None:
                 eq = v["equivalent"]
             except Exception as e:
                 eq, v = None, {"error": repr(e)}
-            rec = {"project": lab.project, "tool": lab.tool, "kind": "desirability", "source": source,
+            rec = {"project": lab.project, "commit": lab.commit, "tool": lab.tool,
+                   "kind": "desirability", "source": source, "valid_conflict": lab.valid_conflict,
                    "manual": lab.desirable, "judge": eq, "reason": v.get("reason", "")}
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()
