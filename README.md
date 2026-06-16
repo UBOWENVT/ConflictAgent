@@ -114,6 +114,7 @@ Start with [docs/SPEC.md](docs/SPEC.md), then [docs/ARCHITECTURE.md](docs/ARCHIT
 - [docs/SPEC.md](docs/SPEC.md): stable current design.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): code and data-flow map.
 - [docs/RESULTS.md](docs/RESULTS.md): grounded results and interpretation.
+- [docs/CASE_STUDIES.md](docs/CASE_STUDIES.md): representative examples for explaining metrics.
 - [docs/DATA.md](docs/DATA.md): ConflictBench schema, reconstruction, and gotchas.
 - [docs/PROMPTS.md](docs/PROMPTS.md): exact solver prompts.
 - [docs/HANDOFF.md](docs/HANDOFF.md): current handoff notes.
