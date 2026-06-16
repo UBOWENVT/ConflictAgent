@@ -6,7 +6,8 @@ Read in this order:
 2. [SPEC.md](SPEC.md)
 3. [ARCHITECTURE.md](ARCHITECTURE.md)
 4. [RESULTS.md](RESULTS.md)
-5. [PROMPTS.md](PROMPTS.md)
+5. [CASE_STUDIES.md](CASE_STUDIES.md)
+6. [PROMPTS.md](PROMPTS.md)
 
 ## Current State
 
