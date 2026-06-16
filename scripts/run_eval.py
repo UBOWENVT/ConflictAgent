@@ -109,6 +109,8 @@ def main() -> None:
     ap.add_argument("--providers", nargs="+", default=["openai", "gemini"])
     ap.add_argument("--limit", type=int, default=0, help="0 = all reconstructable Java scenarios")
     ap.add_argument("--no-baselines", action="store_true", help="skip trivial baselines (saves judge calls)")
+    ap.add_argument("--only-ids", nargs="+", default=None,
+                    help="run only these scenario ids (e.g. to recover specific failed scenarios)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -119,6 +121,13 @@ def main() -> None:
             usable.append((s, fv))
     if args.limit:
         usable = usable[: args.limit]
+    if args.only_ids:
+        want = set(args.only_ids)
+        usable = [(s, fv) for (s, fv) in usable if s.id in want]
+        found = {s.id for (s, fv) in usable}
+        missing = want - found
+        if missing:
+            print(f"WARNING: --only-ids not found among reconstructable scenarios: {sorted(missing)}")
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     out_path = Path(args.out) if args.out else config.OUTPUT_DIR / "eval" / f"eval_{args.scheme}_{stamp}.jsonl"
