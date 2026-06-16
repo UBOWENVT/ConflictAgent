@@ -1,25 +1,25 @@
-"""The three metrics (SPEC; aligned with the resume), reported per retry round.
+"""Small metric helpers kept for ad hoc analysis.
 
-  1. syntax_valid_rate  -- fraction parsing as valid Java. Denominator = Java subset (106).
-  2. token_level_f1     -- vs developer version; cheap lexical overlap, no judge needed.
-  3. judge_equivalence  -- vs developer version; needs the calibrated judge.
+The original metrics module described the old headline metrics: retry-round syntax-valid rate,
+token-level F1, and single-shot-vs-loop delta. Those are no longer the project's primary metrics.
 
-Core deliverable = single-shot baseline (round 0) vs agent-loop delta across rounds.
-Keep all numbers grounded in actual runs — never hard-code example results here.
+Current primary metrics are computed directly in scripts/run_eval.py and scripts/compare_tools.py:
+
+- developer-match, judged by the calibrated judge;
+- standalone-valid, used substantively only on false conflicts;
+- scheme-B detection precision/recall;
+- confidence calibration;
+- trivial baseline rates.
 """
+
 from __future__ import annotations
 
 
-def syntax_valid_rate(records: list[dict]) -> float:
-    """Fraction of Java scenarios whose final resolution parses. TODO."""
-    raise NotImplementedError
+def rate(numerator: int, denominator: int) -> float:
+    """Return numerator / denominator, or 0.0 for an empty denominator."""
+    return numerator / denominator if denominator else 0.0
 
 
-def token_level_f1(candidate: str, developer: str) -> float:
-    """Token-level F1 between candidate and developer version. TODO (tokenize, P/R/F1)."""
-    raise NotImplementedError
-
-
-def judge_equivalence_rate(records: list[dict]) -> float:
-    """Fraction judged semantically equivalent to the developer version. TODO."""
-    raise NotImplementedError
+def format_rate(numerator: int, denominator: int) -> str:
+    """Format a count and percentage consistently for summaries."""
+    return f"{numerator}/{denominator} = {rate(numerator, denominator):.1%}"

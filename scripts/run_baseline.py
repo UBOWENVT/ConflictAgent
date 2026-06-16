@@ -1,11 +1,23 @@
-"""Reproduce the single-shot baseline (round 0) with the new solver models.
+"""Deprecated single-shot baseline entrypoint.
 
-This is the control arm. One solver call per scenario, no validation, no retry —
-mirrors LLM_Experiment/llm_experiment_script.py but with current models. Its
-outputs are what the agent loop must beat.
+The project originally planned to compare "round 0 single-shot" against the validate-and-retry
+loop. Full runs showed modern solver models usually emit syntactically valid code on the first
+attempt, so that baseline stopped being the main explanatory comparison.
 
-TODO: for each scenario, solver.solve(provider, s) once; record; no loop.
+Use scripts/run_eval.py instead. It computes the current baselines:
+pick-left, pick-right, pick-longer, and union.
 """
 
+from __future__ import annotations
+
+
+def main() -> None:
+    raise SystemExit(
+        "scripts/run_baseline.py is deprecated. "
+        "Use `python scripts/run_eval.py --scheme A --providers openai gemini`; "
+        "trivial baselines are computed inside run_eval.py."
+    )
+
+
 if __name__ == "__main__":
-    raise SystemExit("run_baseline: not implemented yet")
+    main()
