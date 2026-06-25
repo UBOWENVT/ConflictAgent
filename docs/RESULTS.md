@@ -1,72 +1,174 @@
 # Results
 
-This file records grounded results from the completed 2026-06-09 milestone.
+This file records grounded results from the completed 2026-06-09 milestone. All
+developer-match rates are stratified by conflict type and computed by
+`scripts/compare_tools.py` from the saved eval files; the numbers below supersede
+an earlier un-stratified snapshot.
 
 ## Judge Calibration
 
-Developer-match judge calibration used ConflictBench's human desirability labels for tool outputs.
+The developer-match judge (claude-sonnet-4-6) was calibrated against ConflictBench's
+human desirability labels for tool outputs.
 
-- Total labeled tool pairs: 627.
-- Desirability judgments: 310.
-- Detection events: 253.
-- Empty/skipped fallback cases: 64.
-- Developer-match judge: accuracy 70.6%, precision 92.9%, recall 55.6%.
+- Total labeled tool pairs: 627 -> 310 desirability judgments + 253 detection
+  (punt) events + 64 empty/skipped (mostly FSTMerge deletion-style resolutions).
+- Developer-match, n=310: accuracy 70.6%, precision 92.9%, recall 55.6%
+  (TP104 FP8 TN115 FN83).
+- By conflict type: true conflicts (196) precision 90.6%, recall 67.0%; false
+  conflicts (114) precision 100%, recall 37.5%.
 
-Interpretation: the judge is high precision and conservative. A judge `ACCEPTABLE` verdict is
-usually trustworthy; rates are likely lower bounds because recall is modest.
+Interpretation: the judge is high precision and conservative. An `ACCEPTABLE`
+verdict is trustworthy (it almost never accepts a bad resolution); the modest
+recall means it under-credits acceptable alternatives, so every developer-match
+rate below is a conservative lower bound.
 
 ## Standalone-Valid Calibration
 
-Standalone-valid is a separate question: whether a candidate is reasonable from base/left/right
-alone, without the developer answer.
+Standalone-valid is a separate, independent question: whether a candidate is a
+reasonable merge judged from base/left/right alone, without the developer answer.
+It does not compare against the developer resolution, so its conclusions are
+independent of the developer-match results.
 
-On a 40-item human-labeled sample:
+On a 40-item human-labeled blind sample:
 
-- false conflicts: accuracy 85%, precision 88.2%;
-- true conflicts: not used as a correctness metric because there is no context-free correct answer.
+- false conflicts (n=20): accuracy 85%, precision 88.2%, recall 93.8%
+  (TP15 FP2 TN2 FN1);
+- true conflicts: not used as a correctness metric, because a true conflict has
+  no context-free correct answer (the choice depends on developer intent).
 
-Only false-conflict standalone-valid should be used as a substantive correctness number.
+Only the false-conflict number is a substantive correctness figure.
 
-## Full Evaluation
+## Number provenance: how every reported figure is derived
 
-The primary evaluation uses 93 reconstructable Java scenarios, of which about 72 have safe
-developer-region extraction for developer-match.
+All 93 reconstructable Java scenarios are fed to each LLM. The 72 / 50 / 47 below
+are SCORING subsets (cases we can reliably grade), not an input sample: the model
+answers all 93; we simply cannot batch-grade 21 of them.
 
-Scheme A:
+```
+SHARED TRUNK  (input pipeline; all scenarios pass through here)
+--------------------------------------------------------------
+  180  textual conflict scenarios (ConflictBench)
+   |    -74  non-Java           (Java-only scope; syntax guard is Java-specific)
+  106  Java scenarios
+   |    -13  add/delete/rename  (no single-file 3-way content conflict to replay)
+   93  reconstructable Java
+        INPUT: all 93 are fed to EACH LLM (2 providers x 2 schemes).
+        Everything below is SCORING filtering, NOT input sampling.
+   |
+   +--------------------------------+
+   |                                |
+SCHEME A (primary)               SCHEME B (robustness)
+forces a resolution on all       lets the model punt true conflicts
+   |                                |
+  93  fed in                      93  fed in
+   |   -21 ungradeable             |   -24 leave the comparable set
+   |    (20 anchor_not_unique      |    (21 ungradeable, same guards,
+   |     + 1 EOL no_conflict)      |     + gemini punts 5 / openai 1;
+   |                                |     common = the intersection)
+  72  comparable                  69  comparable
+   |    = 50 TRUE + 22 FALSE       |    = 47 TRUE + 22 FALSE
+   |                                |
+  50  TRUE   <- headline          47  TRUE
+  22  FALSE  (also measured)      22  FALSE
+```
 
-- OpenAI developer-match: 38/72 = 52.8%.
-- Gemini developer-match: 45/72 = 62.5%.
-- Strongest trivial baseline: pick-longer, 33/72 = 45.8%.
+### The denominator is fixed by the LLMs, not the tools
 
-Scheme B:
+A scenario enters the comparable set iff BOTH LLMs produced a gradeable resolution
+(`status=resolved`, `dev_status=ok`). The 5 tools are then scored on that fixed
+set; a tool that punts (leaves conflict markers) or has no recorded output counts
+as a MISS. This is the fair convention when one side may abstain: fix the
+denominator by the side that always answers, and count the other side's
+abstention as a failure rather than shrinking the denominator.
 
-- OpenAI developer-match: 40/72 = 55.6%.
-- Gemini developer-match: 43/68 = 63.2%.
-- Detection: OpenAI rarely punts; Gemini punted 5 times in the full run and all were true conflicts.
+One asymmetry to keep in mind: a tool punt stays in the denominator as a miss, but
+an LLM punt in Scheme B removes that scenario from the denominator. So Scheme B's
+LLM rates sit on a self-selected "resolvable" subset, which is why Scheme A
+(no gating, forces a resolution on all 50 true conflicts) is the PRIMARY scheme
+and Scheme B is a robustness check.
 
-## LLMs vs Five Traditional Tools
+### Both conflict types are measured; the headline uses true conflicts
 
-Using the same target-block developer-match framing:
+True conflicts are the hard case (overlapping edits requiring judgement); false
+conflicts (compatible edits) should auto-merge, so beating tools there is less
+telling. Both are reported; the resume headline quotes the true-conflict row.
 
-- true conflicts: LLMs score about 62-66%;
-- strongest traditional tool under the human-label view is <=52%;
-- false conflicts: LLMs are at least competitive with the strongest tools.
+### True-conflict developer-match (Scheme A, n=50)
 
-The main advantage on true conflicts comes from traditional tools abstaining or leaving conflicts
-unresolved, while the LLMs usually attempt a resolution.
+| solver / tool | our judge (single-instrument) | human-label (tools) | punts |
+|---|---|---|---|
+| LLM Gemini   | 32/50 = 64.0% | --    | --  |
+| LLM OpenAI   | 31/50 = 62.0% | --    | --  |
+| AutoMerge    | 20/50 = 40.0% | 52.0% | 11  |
+| JDime        | 19/50 = 38.0% | 48.0% | 17  |
+| IntelliMerge | 13/50 = 26.0% | 32.0% | 22  |
+| FSTMerge     |  8/50 = 16.0% | 26.0% | 18  |
+| KDiff3       |  1/50 =  2.0% |  6.0% | 46  |
+
+Scheme B (n=47): Gemini 31/47 = 66.0%, OpenAI 30/47 = 63.8%; strongest tool
+(human-label) AutoMerge 53.2%.
+
+Two instruments: `human-label` scores the tools with ConflictBench's (lenient)
+human labels; `single-instrument` scores BOTH the LLM and the tools with our
+Claude judge (apples-to-apples). The headline uses the human-label tool column --
+the view most generous to the tools -- and the gap only widens under the single
+instrument (strongest tool AutoMerge drops to 40.0%). Tool resolutions come from
+the xlsx tool snippets recorded by ConflictBench, not from locally re-run tools;
+the LLM advantage on true conflicts comes largely from tools abstaining (KDiff3
+punts 46 of 50).
+
+### False-conflict developer-match
+
+Measured too, with a weaker narrative (tools abstain less, so the gap is smaller):
+
+- Scheme A (n=22): Gemini 13/22 = 59.1%, OpenAI 11/22 = 50.0%; tools at most 59.1%
+  (human-label) / 22.7% (single-instrument).
+- Scheme B (n=22): Gemini 13/22 = 59.1%, OpenAI 13/22 = 59.1%.
+
+### Scheme A vs Scheme B agree
+
+On scenarios graded in both schemes, the developer-match verdicts agree closely,
+confirming that B (allowing punts) does not overturn A:
+
+- Gemini: 67/69 = 97% agreement;
+- OpenAI: 60/71 = 85% agreement (disagreements split both ways, no systematic
+  direction).
+
+The two schemes feed different prompts and are independent model calls, so a
+resolution need not be byte-identical across them; what matters is that the graded
+outcome is stable. The measuring instrument's reliability is the judge calibration
+above.
+
+### Resume headline mapping
+
+"true conflicts ~63% vs <=52%" = LLM 62-66% (A: 62.0/64.0, B: 63.8/66.0) vs the
+strongest traditional tool 52.0% (AutoMerge, human-label, Scheme A). Scheme B's
+strongest tool is 53.2%, so "<=52%" is Scheme-A-specific; cross-scheme it is
+<=~53%.
 
 ## Key Findings
 
-- Modern solver models usually produce syntactically valid code on the first attempt.
-- Retry remains useful as a safety loop, but it is not the headline result.
+- On true conflicts, both LLMs (62-66%) beat every traditional tool (<=52% under
+  the tool-friendly human-label view), mainly because tools abstain or leave
+  conflicts unresolved while the LLMs attempt a resolution.
+- Schemes A and B agree closely on developer-match (Gemini 97%, OpenAI 85%), so
+  forcing the model to declare conflict-ness first (B) does not change the
+  aggregate result; B's punts are rare but precise (all on true conflicts).
+- Modern solver models usually produce syntactically valid code on the first
+  attempt, so retry is a safety loop, not the headline.
 - Self-reported confidence is not a reliable desirability predictor.
-- Scheme A and B have similar aggregate desirability; scheme B's punt behavior is rare but precise.
 - Gemini was generally steadier than OpenAI on final validity in the recorded runs.
 
 ## Limitations
 
-- The developer-match judge is conservative and may under-credit acceptable alternatives.
-- LLM outputs do not have independent human labels, so some judge-style bias cannot be fully ruled out.
-- Anchor-based developer extraction excludes cases where the region cannot be safely located.
+- The developer-match judge is conservative and may under-credit acceptable
+  alternatives (recall 55.6%), so reported rates are lower bounds.
+- LLM outputs do not have independent human labels, so some judge-style bias
+  cannot be fully ruled out (the judge is a different vendor from both solvers,
+  which mitigates self-preference).
+- Anchor-based developer extraction excludes 20 scenarios whose region cannot be
+  uniquely located; these split into four causes (boundary_edge, duplicate_context,
+  adjacent_block_marker, rewrite_vanished) detailed in DATA.md. The guard excludes
+  rather than guesses, so the denominator is a conservative subset, not a biased one.
 - `javalang` checks syntax, not full Java compilation.
 - Standalone-valid is meaningful only for false conflicts.
