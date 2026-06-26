@@ -18,6 +18,11 @@ data/*
 outputs/
 *.log
 
+# DeepEval local cache / telemetry / config (auto-generated at runtime)
+.deepeval/
+.deepeval_telemetry.txt
+temp_test_run_data.json
+
 # OS / editor
 .DS_Store
 .idea/
