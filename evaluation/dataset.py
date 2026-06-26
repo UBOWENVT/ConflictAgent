@@ -11,9 +11,11 @@ Each test case carries the human label and provenance in metadata:
         "human_desirable": bool,       # the ground-truth human label (for ③)
     }
 
-Filtering mirrors scripts/calibrate_judge.py exactly, so the population is the same:
+Filtering (slightly STRICTER than scripts/calibrate_judge.py, which only drops empty xlsx pairs --
+this also drops file-source empties so an empty region never reaches the GEval judge):
   - skip punts (tool left the conflict unresolved -> a detection event, not a resolution);
-  - skip empty xlsx-fallback pairs (genuinely-missing snippet, e.g. a deletion).
+  - skip pairs whose candidate or developer region is empty, regardless of source (an xlsx deletion,
+    or a file-source region the anchor extraction lost to a repack/rename) -- not judgeable.
 """
 from __future__ import annotations
 
@@ -36,8 +38,9 @@ def build_metavalidation_testcases(limit: int | None = None) -> list[LLMTestCase
         if lab.is_punt:
             continue  # detection event, not a desirability judgment
         ji = pairs.build_judge_inputs(lab)
-        if ji.source == "xlsx" and (not ji.candidate.strip() or not ji.developer.strip()):
-            continue  # genuinely-missing xlsx fallback
+        if not ji.candidate.strip() or not ji.developer.strip():
+            continue  # empty region (xlsx deletion, or a file-source region the anchor lost to a
+            #           repack/rename) -- not judgeable, and an empty actual_output errors GEval
         cases.append(
             LLMTestCase(
                 input=ji.conflict,
