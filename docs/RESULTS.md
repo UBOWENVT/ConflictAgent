@@ -22,6 +22,68 @@ verdict is trustworthy (it almost never accepts a bad resolution); the modest
 recall means it under-credits acceptable alternatives, so every developer-match
 rate below is a conservative lower bound.
 
+## Judge Meta-Validation (DeepEval re-implementation, Phase 1)
+
+The developer-match judge above was re-implemented as a DeepEval `GEval` LLM-as-judge
+metric (`evaluation/metrics.py`, `ResolutionAcceptability`) and re-validated against the
+same ConflictBench human desirability labels (`evaluation/run_suite.py`). This is the
+DeepEval-native version of the calibration; the numbers are a fresh measurement, not a
+reproduction of the hand-built judge. Two deliberate differences from the hand-built judge:
+it also sees the diff3 conflict block (more-informed), and it drops empty-region pairs from
+*either* source (see lineage), where the historical n=310 dropped only xlsx-empty pairs.
+
+Population lineage (consistent with the 627 breakdown above):
+
+```
+627  (row x tool) pairs with a 0/1 desirability label          [data.load_manual_labels]
+ |   -253  punts        (lab.is_punt: tool left the conflict unresolved = a detection
+ |                       event, not a resolution -- a DATA FACT)
+374  non-punt desirability pairs
+ |   -71   empty regions (candidate or developer empty after extraction, ANY source:
+ v                       xlsx deletion, or a file region the anchor lost to an import
+303  judgeable cases     repack/rename -- a JUDGEABILITY filter)
+     -> fed to the GEval judge
+```
+
+The historical hand-built calibration used n=310 (it dropped only the 64 xlsx-empty
+pairs); the DeepEval filter additionally drops ~7 file-source empty regions (the anchor
+lost the developer region to a repack/rename, or a tool's output region was empty), giving
+n=303. Filtering is in `evaluation/dataset.py` (two conditions, documented inline).
+
+**Result (n=303, judge = claude-sonnet-4-6, threshold 0.5):**
+
+- accuracy 76.9%, **precision 100.0%**, recall 61.7%  (TP113 FP0 TN120 FN70).
+- The GEval judge is *even more* conservative than the hand-built one: zero false accepts
+  on this set, so an `ACCEPTABLE` verdict is fully trustworthy; the cost is recall (it
+  under-credits acceptable alternatives), so every solver/tool rate it produces is a
+  conservative lower bound.
+
+**Input-fidelity robustness check (`evaluation/audit_input_fidelity.py`).** The judge
+validation surfaced a ground-truth *extraction* limitation rather than a judge defect:
+anchor-based region extraction loses the developer/tool region when the developer reordered
+or renamed the block (e.g. alphabetised imports), and a minority of xlsx fallback snippets
+were hand-elided with `...`. Restricting to inputs with no known fidelity defect (n=281)
+leaves precision essentially unchanged and lifts recall:
+
+| subset | n | precision | recall |
+|---|---|---|---|
+| current run (empty-region filter) | 303 | 100.0% | 61.7% |
+| no-known-fidelity-defect subset   | 281 | 98.3%  | 70.1% |
+
+So the judge's high precision is **not** an artifact of polluted inputs (it holds at
+98-100% under every filter), and the depressed recall is partly input-fidelity artifacts
+(lost regions, elided snippets), not judge behaviour. The main conclusion -- a
+high-precision, conservative judge -- is stable.
+
+**Scope notes.**
+- The solver-line results below still rest on the *hand-built* judge; re-scoring the LLM
+  solver outputs through this DeepEval suite (with the `StructuralValidity` metric) is the
+  pending Dataset B work, not yet done.
+- A deeper fix of the anchor extraction was deliberately declined: it would change the
+  extraction every result in this file depends on, invalidating the committed 2026-06-09
+  milestone for a subset that the clean-subset check shows does not move the conclusion.
+  The extraction limitation is recorded here and in Limitations rather than fixed.
+
 ## Standalone-Valid Calibration
 
 Standalone-valid is a separate, independent question: whether a candidate is a
