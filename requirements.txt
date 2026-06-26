@@ -16,3 +16,6 @@ openpyxl               # read ConflictBench.xlsx
 # --- Utils ---
 python-dotenv          # load .env
 tenacity               # API retry / backoff
+
+# --- Evaluation (DeepEval suite) ---
+deepeval               # LLM-as-judge metrics (GEval) + custom structural checks

@@ -23,30 +23,13 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from conflictagent import config, data, groundtruth, judge, merge  # noqa: E402
+from conflictagent import config, data, judge, pairs  # noqa: E402
 
 
 def build_pair(lab: data.ManualLabel) -> tuple[str, str, str]:
-    """Return (candidate, developer, source). source in {'file','xlsx'}.
-
-    Prefer real-file region extraction; fall back to cleaned xlsx snippets when the files are
-    missing or the anchors aren't unique. Both sides always come from the SAME source, so the
-    pair is span-consistent.
-    """
-    files = data.load_scenario_files(lab.project, lab.commit)
-    if {"base", "left", "right"} <= files.keys():
-        merged, _ = merge.reconstruct_merged(files["base"], files["left"], files["right"])
-        idx, _ = groundtruth.select_target_block(merged, lab.merged_snippet)
-        tool_file = files.get(data.tool_folder(lab.tool))
-        child_file = files.get("child")
-        if idx >= 0 and tool_file is not None and child_file is not None:
-            tool_region, st_t = groundtruth.resolution_region(tool_file, merged, idx)
-            dev_region, st_d = groundtruth.resolution_region(child_file, merged, idx)
-            if st_t == "ok" and st_d == "ok":
-                return tool_region, dev_region, "file"
-    # fallback: cleaned xlsx snippets (both sides at the human annotation span)
-    return (data.clean_xlsx_snippet(lab.tool_resolution),
-            data.clean_xlsx_snippet(lab.developer), "xlsx")
+    """Return (candidate, developer, source). Single source of truth now lives in
+    conflictagent.pairs (shared with the DeepEval suite); this is a thin delegation."""
+    return pairs.build_pair(lab)
 
 
 def main() -> None:
