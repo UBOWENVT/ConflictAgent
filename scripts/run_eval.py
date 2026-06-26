@@ -235,7 +235,12 @@ def main() -> None:
                       "valid_conflict": s.valid_conflict, "status": rec["status"], "punt": punt,
                       "n_blocks": rec.get("n_blocks"), "n_rounds": nr, "confidence": conf,
                       "strategy": rec.get("strategy", ""), "dev_status": dev_status,
-                      "dev_match": dm, "standalone": sv, "final_valid": rec.get("final_valid")})
+                      "dev_match": dm, "standalone": sv, "final_valid": rec.get("final_valid"),
+                      # solver output text (actual_output for Dataset B) + the developer region it
+                      # was judged against (expected_output); together they make dev_match auditable
+                      # and let Dataset B reuse this run without re-calling the solver.
+                      "final_resolution": rec.get("final_resolution", ""),
+                      "dev_region": dev_region})
 
     _summary(args, pstats, bstats, out_path, timing)
 
