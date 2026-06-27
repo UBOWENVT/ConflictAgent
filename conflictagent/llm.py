@@ -4,9 +4,10 @@ Single entry point: `call(provider, model, system, user) -> str` so that
 solver/judge code stays provider-agnostic. SDK imports are lazy (inside function
 bodies) — the module itself imports without any SDK installed.
 
-Wraps with tenacity retry (10 attempts, exponential backoff 5s->90s, ~5 min total,
-each backoff logged) for transient server / rate-limit errors such as Gemini 503
-"high demand" spikes. Key-validation errors are raised immediately in call() without retry.
+Wraps with tenacity retry (4 attempts, exponential backoff 5s->30s, ~1 min worst case,
+each backoff printed to stdout so a stall is visible) for transient server / rate-limit errors
+such as Gemini 503 "high demand" spikes. Key-validation errors are raised immediately in call()
+without retry.
 
 Gemini uses the current `google-genai` SDK (`from google import genai`).
 """
@@ -15,7 +16,6 @@ from __future__ import annotations
 import logging
 
 from tenacity import (
-    before_sleep_log,
     retry,
     stop_after_attempt,
     wait_exponential,
@@ -24,6 +24,17 @@ from tenacity import (
 from . import config
 
 log = logging.getLogger(__name__)
+
+
+def _log_retry(state) -> None:
+    """Print each backoff to STDOUT so a stalled run is visible in the terminal (logging handlers
+    aren't configured by default, so before_sleep_log was silent -- that is why a 503 spike looked
+    like a 40-minute hang with no output)."""
+    exc = state.outcome.exception() if state.outcome else None
+    wait = getattr(state.next_action, "sleep", 0.0)
+    msg = (str(exc).splitlines() or [""])[0][:120]
+    print(f"    [retry {state.attempt_number}/4] {type(exc).__name__}: {msg} "
+          f"-> waiting {wait:.0f}s", flush=True)
 
 # ---------------------------------------------------------------------------
 # Lazy-initialized clients (created on first call, not on import)
@@ -90,9 +101,9 @@ def call(provider: str, model: str, system: str, user: str, **kwargs) -> str:
 
 
 @retry(
-    wait=wait_exponential(min=5, max=90),
-    stop=stop_after_attempt(10),                          # ~5 min total backoff (5->90s) for 503 spikes
-    before_sleep=before_sleep_log(log, logging.WARNING),  # log each backoff so spikes are visible
+    wait=wait_exponential(min=5, max=30),
+    stop=stop_after_attempt(4),                           # ~1 min worst-case backoff (5+10+20+30s)
+    before_sleep=_log_retry,                              # print each backoff to stdout (visible)
     reraise=True,
 )
 def _call_api(provider: str, model: str, system: str, user: str,

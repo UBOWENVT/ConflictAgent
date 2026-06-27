@@ -109,6 +109,10 @@ def main() -> None:
     ap.add_argument("--providers", nargs="+", default=["openai", "gemini"])
     ap.add_argument("--limit", type=int, default=0, help="0 = all reconstructable Java scenarios")
     ap.add_argument("--no-baselines", action="store_true", help="skip trivial baselines (saves judge calls)")
+    ap.add_argument("--no-judge", action="store_true",
+                    help="skip ALL Claude judge calls (baselines + dev/std); only run the solver and "
+                         "save final_resolution. dev_match/standalone come out null. Use this for "
+                         "Dataset B data production -- the DeepEval suite re-judges separately.")
     ap.add_argument("--only-ids", nargs="+", default=None,
                     help="run only these scenario ids (e.g. to recover specific failed scenarios)")
     ap.add_argument("--out", default=None)
@@ -138,7 +142,8 @@ def main() -> None:
     timing = {"solve": 0.0, "judge": 0.0, "base_judge": 0.0,
               "rounds": {p: {} for p in args.providers}}  # rounds[p][n_rounds] = scenario count
     print(f"Evaluating {len(usable)} Java scenarios x {args.providers} | scheme={args.scheme} "
-          f"| judge={config.JUDGE_MODEL[1]} | baselines={'off' if args.no_baselines else 'on'}")
+          f"| judge={'OFF (no-judge)' if args.no_judge else config.JUDGE_MODEL[1]} "
+          f"| baselines={'off' if (args.no_baselines or args.no_judge) else 'on'}")
 
     timing_path = out_path.with_suffix(".timing.csv")
     with open(out_path, "w", encoding="utf-8") as fh, \
@@ -170,7 +175,7 @@ def main() -> None:
                     dev_region, dev_status = groundtruth.resolution_region(fv["child"], merged, tgt)
 
             # --- Trivial baselines (provider-independent; judged once) ---
-            if not args.no_baselines and tgt >= 0:
+            if not args.no_baselines and not args.no_judge and tgt >= 0:
                 _bt = time.perf_counter()
                 for name, cand in _build_baselines(left, base, right).items():
                     dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
@@ -219,11 +224,12 @@ def main() -> None:
                 if rec["status"] == "resolved":
                     st["resolved"] += 1
                     cand = rec["final_resolution"]
-                    dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
-                                     left, base, right)
-                    sv = _judge_pair("std", cand, None, left, base, right)
-                    _acc(st["dev"], s.valid_conflict, dm, conf)
-                    _acc(st["std"], s.valid_conflict, sv, conf)
+                    if not args.no_judge:
+                        dm = _judge_pair("dev", cand, dev_region if dev_status == "ok" else None,
+                                         left, base, right)
+                        sv = _judge_pair("std", cand, None, left, base, right)
+                        _acc(st["dev"], s.valid_conflict, dm, conf)
+                        _acc(st["std"], s.valid_conflict, sv, conf)
                 elif punt:
                     st["punt"] += 1
                 judge_s = time.perf_counter() - _j0
