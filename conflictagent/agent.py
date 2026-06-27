@@ -16,8 +16,12 @@ judged afterwards, outside the loop (run_eval).
 """
 from __future__ import annotations
 
+import logging
+
 from . import config, groundtruth, merge, solver, validate
 from .data import Scenario
+
+log = logging.getLogger(__name__)
 
 
 def _annotate_target(merged: str, target_idx: int) -> str:
@@ -99,6 +103,8 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str],
         out = solver.solve(provider, scheme, window, prior_attempt, validator_error)
         last = out
         if out["conflict_type"] == "true_conflict":   # only reachable in scheme B
+            log.debug("%s/%s [%s] punt (predicted true_conflict) at round %d",
+                      s.id, provider, scheme, r)
             return {**base_record, "status": "punt", "predicted_true_conflict": True,
                     "reasoning": out["reasoning"], "strategy": out["strategy"],
                     "confidence": out["confidence"],
@@ -107,6 +113,8 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str],
         valid, err = _validate(resolution, merged, target_idx, s.is_java)
         rounds.append({"round": r, "resolution": resolution, "valid": valid, "error": err,
                        "strategy": out["strategy"], "confidence": out["confidence"]})
+        log.debug("%s/%s [%s] round %d: valid=%s%s", s.id, provider, scheme, r, valid,
+                  "" if valid else f"  retry on: {err[:100]!r}")
         if valid:
             break
         prior_attempt, validator_error = resolution, err
@@ -116,6 +124,8 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str],
     # resolution -- mark it 'empty' so it is never counted as resolved or judged as a wrong answer
     # (an empty output is a non-result, not an unacceptable resolution).
     produced = bool(final["resolution"].strip())
+    log.debug("%s/%s [%s] done: status=%s n_rounds=%d", s.id, provider, scheme,
+              "resolved" if produced else "empty", len(rounds))
     return {
         **base_record,
         "status": "resolved" if produced else "empty",
