@@ -35,6 +35,12 @@ def _annotate_target(merged: str, target_idx: int) -> str:
 
 def _validate(resolution: str, merged: str, target_idx: int, is_java: bool) -> tuple[bool, str]:
     """Inference-time validation (no ground truth)."""
+    if not resolution.strip():
+        # An empty/whitespace-only resolution means the model returned no usable text (truncation,
+        # safety block, or an empty completion). Without this guard it slips through: it has no
+        # conflict markers, and for multi-block files (or files that still parse with the block
+        # deleted) the checks below would wrongly accept it. Fail it so the loop retries.
+        return False, "Empty resolution \u2014 the model returned no text. Output the replacement for the tagged <<<<<<< \u2026 >>>>>>> region."
     if validate.has_conflict_markers(resolution):
         return False, "Output still contained conflict markers (<<<<<<< / ======= / >>>>>>>)."
     spliced = validate.splice_block(merged, resolution, target_idx)
@@ -106,9 +112,13 @@ def resolve(provider: str, s: Scenario, full_versions: dict[str, str],
         prior_attempt, validator_error = resolution, err
 
     final = rounds[-1]
+    # If retries were exhausted and the model still produced nothing usable, this is NOT a
+    # resolution -- mark it 'empty' so it is never counted as resolved or judged as a wrong answer
+    # (an empty output is a non-result, not an unacceptable resolution).
+    produced = bool(final["resolution"].strip())
     return {
         **base_record,
-        "status": "resolved",
+        "status": "resolved" if produced else "empty",
         "predicted_true_conflict": False,
         "reasoning": last.get("reasoning", ""),
         "strategy": final["strategy"],
