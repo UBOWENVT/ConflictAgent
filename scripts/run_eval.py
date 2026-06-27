@@ -134,7 +134,11 @@ def main() -> None:
             print(f"WARNING: --only-ids not found among reconstructable scenarios: {sorted(missing)}")
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    out_path = Path(args.out) if args.out else config.OUTPUT_DIR / "eval" / f"eval_{args.scheme}_{stamp}.jsonl"
+    prov_tag = "both" if set(args.providers) == {"openai", "gemini"} else "-".join(args.providers)
+    mode_tag = "nojudge" if args.no_judge else "full"
+    out_path = (Path(args.out) if args.out else
+                config.OUTPUT_DIR / "eval" / "runs"
+                / f"eval_{args.scheme}_{prov_tag}_{mode_tag}_{stamp}.jsonl")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     pstats = {p: _prov_stats() for p in args.providers}
