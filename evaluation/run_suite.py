@@ -1,4 +1,4 @@
-"""Run the DeepEval suite — Phase 1: ③ judge meta-validation.
+"""Run the DeepEval suite — Phase 1: ③ judge meta-evaluation.
 
 Runs the ① Resolution Acceptability (GEval) judge over the 303 human-labeled desirability cases
 and compares its accept/reject verdicts to the human labels: a confusion matrix (accuracy /
@@ -17,7 +17,8 @@ Cost: one Claude judge call per case. Use --limit for a cheap pipeline check fir
 Design note: this uses a manual per-case loop rather than deepeval.evaluate() because ③ needs a
 custom join of judge verdict vs human label (a confusion matrix + disagreement dump), which the
 aggregate pass-rate reporting of evaluate() does not provide. The later solver-evaluation runner
-(Dataset B, ① + ② together) is the place for evaluate().
+(Dataset B, ① + ② together) uses the same manual-loop pattern, for the same reason — stratified
+aggregation (by conflict type and provider) that evaluate() does not give.
 """
 from __future__ import annotations
 
@@ -49,19 +50,19 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    setup_logging(tag="metaval")
+    setup_logging(tag="meta_evaluation")
 
-    cases = dataset.build_metavalidation_testcases(limit=args.limit)
+    cases = dataset.build_metaevaluation_testcases(limit=args.limit)
     metric = metrics.resolution_acceptability_metric(threshold=args.threshold)
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     out_path = Path(args.out) if args.out else (
-        config.OUTPUT_DIR / "deepeval" / f"metaval_{stamp}.jsonl")
+        config.OUTPUT_DIR / "deepeval" / f"meta_evaluation_{stamp}.jsonl")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     tp = fp = tn = fn = errors = 0
     disagreements: list[dict] = []
-    log.info(f"3 judge meta-validation: {len(cases)} cases, judge={config.JUDGE_MODEL[1]}, "
+    log.info(f"3 judge meta-evaluation: {len(cases)} cases, judge={config.JUDGE_MODEL[1]}, "
              f"threshold={args.threshold}")
     with open(out_path, "w", encoding="utf-8") as fh:
         for i, tc in enumerate(cases, 1):
