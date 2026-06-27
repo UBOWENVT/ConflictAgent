@@ -32,12 +32,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conflictagent import config, data, agent, groundtruth, judge, merge, validate  # noqa: E402
+from conflictagent.logging_setup import setup_logging  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 BASELINES = ("pick-left", "pick-right", "pick-longer", "union")
 CONF_BUCKETS = ("high", "medium", "low", "")   # "" = model gave no/unparsed confidence
@@ -118,6 +122,8 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
+    setup_logging(tag=f"eval_{args.scheme}")
+
     usable = []
     for s in data.load_scenarios(java_only=True):
         fv = data.load_full_versions(s)
@@ -145,9 +151,9 @@ def main() -> None:
     bstats = _base_stats()
     timing = {"solve": 0.0, "judge": 0.0, "base_judge": 0.0,
               "rounds": {p: {} for p in args.providers}}  # rounds[p][n_rounds] = scenario count
-    print(f"Evaluating {len(usable)} Java scenarios x {args.providers} | scheme={args.scheme} "
-          f"| judge={'OFF (no-judge)' if args.no_judge else config.JUDGE_MODEL[1]} "
-          f"| baselines={'off' if (args.no_baselines or args.no_judge) else 'on'}")
+    log.info(f"Evaluating {len(usable)} Java scenarios x {args.providers} | scheme={args.scheme} "
+             f"| judge={'OFF (no-judge)' if args.no_judge else config.JUDGE_MODEL[1]} "
+             f"| baselines={'off' if (args.no_baselines or args.no_judge) else 'on'}")
 
     timing_path = out_path.with_suffix(".timing.csv")
     with open(out_path, "w", encoding="utf-8") as fh, \
@@ -166,7 +172,7 @@ def main() -> None:
 
         n_total = len(usable)
         for idx, (s, fv) in enumerate(usable, 1):
-            print(f"  [{idx}/{n_total}] {s.id}", flush=True)
+            log.info(f"  [{idx}/{n_total}] {s.id}")
             merged, _ = merge.reconstruct_merged(fv["base"], fv["left"], fv["right"])
             blocks = validate.conflict_blocks(merged)
             tgt, _ = groundtruth.select_target_block(merged, s.conflict_chunk)
@@ -258,57 +264,57 @@ def main() -> None:
 def _summary(args, pstats: dict, bstats: dict, out_path: Path, timing: dict | None = None) -> None:
     for p in args.providers:
         st = pstats[p]
-        print(f"\n=== {p}  (scheme {args.scheme}) ===")
-        print(f"  resolved: {st['resolved']}   punts: {st['punt']}   errors: {st['errors']}")
+        log.info(f"\n=== {p}  (scheme {args.scheme}) ===")
+        log.info(f"  resolved: {st['resolved']}   punts: {st['punt']}   errors: {st['errors']}")
         if args.scheme == "B":
             d = st["det"]
             prec = d["punt_true"] / d["punt"] if d["punt"] else 0.0
             recl = d["punt_true"] / d["true_total"] if d["true_total"] else 0.0
-            print(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} "
-                  f"true conflicts -> precision={prec:.1%} recall={recl:.1%}")
+            log.info(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} "
+                     f"true conflicts -> precision={prec:.1%} recall={recl:.1%}")
         # PRIMARY metric: developer-match (calibrated judge v2), valid across all scenarios.
         dev = st["dev"]
-        print(f"  DESIRABILITY developer-match  [PRIMARY, calibrated judge v2]: {_rate(dev)}")
-        print(f"      true conflict : {_rate(dev['by_vc'][True])}")
-        print(f"      false conflict: {_rate(dev['by_vc'][False])}")
+        log.info(f"  DESIRABILITY developer-match  [PRIMARY, calibrated judge v2]: {_rate(dev)}")
+        log.info(f"      true conflict : {_rate(dev['by_vc'][True])}")
+        log.info(f"      false conflict: {_rate(dev['by_vc'][False])}")
         # standalone-valid is a correctness measure ONLY on false conflicts (an objective merge
         # exists); calibrated there at acc 85% / prec 88% (40 hand labels). On true conflicts it is
         # ill-posed (no context-free correct answer) -> reference only, NOT a correctness measure.
         std = st["std"]
-        print(f"  DESIRABILITY standalone-valid [false conflicts only; calib acc 85%/prec 88%]: "
-              f"{_rate(std['by_vc'][False])}")
-        print(f"      true conflict (ill-posed, reference only — use developer-match): "
-              f"{_rate(std['by_vc'][True])}")
-        print("  CONFIDENCE CALIBRATION (developer-match rate by self-reported confidence):")
+        log.info(f"  DESIRABILITY standalone-valid [false conflicts only; calib acc 85%/prec 88%]: "
+                 f"{_rate(std['by_vc'][False])}")
+        log.info(f"      true conflict (ill-posed, reference only — use developer-match): "
+                 f"{_rate(std['by_vc'][True])}")
+        log.info("  CONFIDENCE CALIBRATION (developer-match rate by self-reported confidence):")
         for c in ("high", "medium", "low", ""):
             b = st["dev"]["by_conf"][c]
             if b["j"]:
-                print(f"      {c or '(none)':<7}: {_rate(b)}")
+                log.info(f"      {c or '(none)':<7}: {_rate(b)}")
 
     if not args.no_baselines:
-        print("\n=== TRIVIAL BASELINES (provider-independent; the bar the LLM must clear) ===")
+        log.info("\n=== TRIVIAL BASELINES (provider-independent; the bar the LLM must clear) ===")
         for name in BASELINES:
             bs = bstats[name]
-            print(f"  {name:<11} dev-match {_rate(bs['dev'])} | standalone {_rate(bs['std'])}")
+            log.info(f"  {name:<11} dev-match {_rate(bs['dev'])} | standalone {_rate(bs['std'])}")
         best = max(BASELINES, key=lambda n: (bstats[n]['dev']['a'] / bstats[n]['dev']['j'])
                    if bstats[n]['dev']['j'] else 0.0)
         bd = bstats[best]['dev']
-        print(f"  strongest baseline (dev-match): {best} = "
-              f"{(bd['a']/bd['j'] if bd['j'] else 0.0):.1%}")
+        log.info(f"  strongest baseline (dev-match): {best} = "
+                 f"{(bd['a']/bd['j'] if bd['j'] else 0.0):.1%}")
 
     if timing:
-        print("\n=== TIMING / RETRIES (diagnostic) ===")
-        print(f"  total solver={timing['solve']:.0f}s  judge(llm)={timing['judge']:.0f}s  "
-              f"judge(baselines)={timing['base_judge']:.0f}s")
+        log.info("\n=== TIMING / RETRIES (diagnostic) ===")
+        log.info(f"  total solver={timing['solve']:.0f}s  judge(llm)={timing['judge']:.0f}s  "
+                 f"judge(baselines)={timing['base_judge']:.0f}s")
         for p in args.providers:
             dist = timing["rounds"].get(p, {})
             n = sum(dist.values()) or 1
             avg = sum(k * v for k, v in dist.items()) / n
             order = "  ".join(f"{k}x{dist[k]}" for k in sorted(dist))
-            print(f"  {p}: avg solver attempts={avg:.2f}  [attempts x scenarios: {order}]")
-        print(f"  per-scenario CSV -> {out_path.with_suffix('.timing.csv')}")
+            log.info(f"  {p}: avg solver attempts={avg:.2f}  [attempts x scenarios: {order}]")
+        log.info(f"  per-scenario CSV -> {out_path.with_suffix('.timing.csv')}")
 
-    print(f"\nRecords -> {out_path}")
+    log.info(f"\nRecords -> {out_path}")
 
 
 if __name__ == "__main__":

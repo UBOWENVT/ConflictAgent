@@ -1,6 +1,6 @@
 """Run the DeepEval suite — Phase 1: ③ judge meta-validation.
 
-Runs the ① Resolution Acceptability (GEval) judge over the ~310 human-labeled desirability cases
+Runs the ① Resolution Acceptability (GEval) judge over the 303 human-labeled desirability cases
 and compares its accept/reject verdicts to the human labels: a confusion matrix (accuracy /
 precision / recall) plus a dump of disagreements with the judge's own reason (failure-mode
 analysis). This is the DeepEval-native re-measurement of judge credibility.
@@ -12,7 +12,7 @@ and per the project decision that is fine; new real numbers are the point.
 Cost: one Claude judge call per case. Use --limit for a cheap pipeline check first.
 
     python evaluation/run_suite.py --limit 20      # ~20 calls, validate the pipeline
-    python evaluation/run_suite.py                 # full ~310 calls
+    python evaluation/run_suite.py                 # full 303 calls
 
 Design note: this uses a manual per-case loop rather than deepeval.evaluate() because ③ needs a
 custom join of judge verdict vs human label (a confusion matrix + disagreement dump), which the
@@ -23,13 +23,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from conflictagent import config            # noqa: E402
+from conflictagent.logging_setup import setup_logging  # noqa: E402
 from evaluation import dataset, metrics     # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 def _meta(tc) -> dict:
@@ -45,6 +49,8 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
+    setup_logging(tag="metaval")
+
     cases = dataset.build_metavalidation_testcases(limit=args.limit)
     metric = metrics.resolution_acceptability_metric(threshold=args.threshold)
 
@@ -55,8 +61,8 @@ def main() -> None:
 
     tp = fp = tn = fn = errors = 0
     disagreements: list[dict] = []
-    print(f"3 judge meta-validation: {len(cases)} cases, judge={config.JUDGE_MODEL[1]}, "
-          f"threshold={args.threshold}")
+    log.info(f"3 judge meta-validation: {len(cases)} cases, judge={config.JUDGE_MODEL[1]}, "
+             f"threshold={args.threshold}")
     with open(out_path, "w", encoding="utf-8") as fh:
         for i, tc in enumerate(cases, 1):
             human = bool(tc.metadata["human_desirable"])
@@ -88,19 +94,19 @@ def main() -> None:
                 disagreements.append(rec)
 
             if i % 20 == 0:
-                print(f"  {i}/{len(cases)} done")
+                log.info(f"  {i}/{len(cases)} done")
 
     n = tp + fp + tn + fn
     acc = (tp + tn) / n if n else 0.0
     prec = tp / (tp + fp) if (tp + fp) else 0.0
     rec = tp / (tp + fn) if (tp + fn) else 0.0
-    print(f"\n=== 1 GEval judge vs human ({n} cases, errors={errors}) ===")
-    print(f"  TP={tp}  FP={fp}  TN={tn}  FN={fn}")
-    print(f"  accuracy={acc:.1%}  precision={prec:.1%}  recall={rec:.1%}")
-    print(f"\n  disagreements: {len(disagreements)}  (full records -> {out_path})")
+    log.info(f"\n=== 1 GEval judge vs human ({n} cases, errors={errors}) ===")
+    log.info(f"  TP={tp}  FP={fp}  TN={tn}  FN={fn}")
+    log.info(f"  accuracy={acc:.1%}  precision={prec:.1%}  recall={rec:.1%}")
+    log.info(f"\n  disagreements: {len(disagreements)}  (full records -> {out_path})")
     for d in disagreements[:10]:
         kind = "FP judge-says-ok " if d["judge"] else "FN judge-says-no "
-        print(f"   [{kind}] {d['project']}/{d['tool']}  score={d['score']}  {(d['reason'] or '')[:90]}")
+        log.info(f"   [{kind}] {d['project']}/{d['tool']}  score={d['score']}  {(d['reason'] or '')[:90]}")
 
 
 if __name__ == "__main__":
