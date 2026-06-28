@@ -1,5 +1,11 @@
 """Evaluate LLM merge-conflict resolution on ConflictBench (2026-06-08 redirect).
 
+SUPERSEDED NOTE (2026-06-27): the solver developer-match numbers this script's full-mode summary
+prints come from the hand-built judge v2 and are SUPERSEDED by the DeepEval suite -- see
+docs/RESULTS.md 'DeepEval Solver Results' for the current figures. This script's current primary
+use is Dataset B data production via --no-judge (runs the solver, saves final_resolution; the
+DeepEval suite re-judges separately).
+
 Result meaning comes from three things, not prompt cleverness:
   1. a judge calibrated to the human labels (judge v2, scripts/calibrate_judge.py);
   2. trivial BASELINES (pick-left / pick-right / pick-longer / union) so the LLM's selling point is
@@ -272,9 +278,13 @@ def _summary(args, pstats: dict, bstats: dict, out_path: Path, timing: dict | No
             recl = d["punt_true"] / d["true_total"] if d["true_total"] else 0.0
             log.info(f"  DETECTION: punts={d['punt']} (true={d['punt_true']}) of {d['true_total']} "
                      f"true conflicts -> precision={prec:.1%} recall={recl:.1%}")
-        # PRIMARY metric: developer-match (calibrated judge v2), valid across all scenarios.
+        # developer-match (hand-built judge v2). NOTE: these solver numbers are SUPERSEDED by the
+        # DeepEval suite -- see docs/RESULTS.md 'DeepEval Solver Results'. Kept as a full-mode
+        # runtime diagnostic only; this script's current primary purpose is Dataset B data
+        # production via --no-judge (judge OFF, so these lines read 0/0 there).
         dev = st["dev"]
-        log.info(f"  DESIRABILITY developer-match  [PRIMARY, calibrated judge v2]: {_rate(dev)}")
+        log.info(f"  DESIRABILITY developer-match  [hand-built judge v2 -- SUPERSEDED; "
+                 f"current numbers in docs/RESULTS.md 'DeepEval Solver Results']: {_rate(dev)}")
         log.info(f"      true conflict : {_rate(dev['by_vc'][True])}")
         log.info(f"      false conflict: {_rate(dev['by_vc'][False])}")
         # standalone-valid is a correctness measure ONLY on false conflicts (an objective merge
