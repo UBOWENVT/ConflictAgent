@@ -12,7 +12,11 @@ The data directory is gitignored.
 ## Scenario Counts
 
 - 180 textual conflict scenarios.
-- 136 true conflicts, 44 false conflicts.
+- 135 true conflicts, 45 false conflicts (orientdb@501dac79 reclassified True -> False: its
+  "conflict" is an EOL artifact that `git merge` resolves cleanly after normalization -- see
+  "Known data edge case" below. Note: ConflictBench's published xlsx still labels it True; this
+  count reflects the corrected classification. The reclassification has no effect on any computed
+  result -- orientdb is already excluded upstream as no_conflict.)
 - 106 Java scenarios.
 - 93 reconstructable Java scenarios with base/left/right available.
 
