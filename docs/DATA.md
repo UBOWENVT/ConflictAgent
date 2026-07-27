@@ -102,6 +102,33 @@ Four tool detection labels are corrected in `conflictagent/data.py` through
 `_DETECTION_OVERRIDES`. The xlsx is left unchanged; the code layers file-grounded corrections on
 top of the original Strategy column.
 
+## FSTMerge detection classification & known labeling gaps (2026-07-25 audit)
+
+> **Scope: this is a ConflictBench (upstream benchmark) labeling matter — a legacy of that
+> project, not a ConflictAgent defect.** ConflictAgent only *consumes* ConflictBench's
+> `{Tool} Strategy` / desirability labels; the gaps below live in the benchmark's manual
+> annotation. Recorded here because ConflictAgent depends on those labels — and to show they do
+> **not** affect any ConflictAgent result (proven zero-impact below). Any actual fix belongs
+> upstream in ConflictBench, not here.
+
+**Ideal Detection-vs-Resolution rule:** a tool output is a scored Resolution only if the FINAL
+target file exists AND has no conflict markers; markers present -> Detection (desirability N/A);
+only `result.txt` (human-added to run the tool) or only a `.merge` intermediate -> Not Applied.
+
+**How ConflictBench's labels diverge from this ideal rule (FSTMerge):**
+- ~62 "generate nothing" pairs that, by the ideal rule, should be N/A rather than 0.
+- 2 outright mislabels: `graphql-java@4cfd6281` and `RxLifecycle@30410d56` — a clean, marker-free
+  final target file exists, yet labeled "generate nothing" (should be a scored Resolution).
+- An NA-vs-"generate nothing" split among no-target cases (same reality, two labels).
+
+**Why ConflictAgent does NOT relabel or re-run (proven zero impact):** all 62 "generate nothing"
+pairs are already excluded from the judge set as empty-region drops; relabeling 0->N/A only swaps
+which filter removes them — they never enter the n=303 set either way, so precision (100%),
+recall (61.7%), and the headline stay unchanged. The 2 mislabels are likewise currently excluded
+(empty xlsx snippet); fixing them would additionally require repairing the nested-path extraction
+(FSTMerge output lives at `FSTMerge/merge/<full/path>/File.ext`, never found by the flat-name
+loader) and would add just 2 pairs to ~305. Documented for traceability.
+
 ## Known data edge case: EOL-induced false conflict (orientdb@501dac79)
 
 Scenario `orientdb@501dac7919b0c0532b7849a010da46f7628fb2da`
