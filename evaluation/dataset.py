@@ -42,21 +42,37 @@ def build_metaevaluation_testcases(limit: int | None = None) -> list[LLMTestCase
         labels = labels[:limit]
 
     cases: list[LLMTestCase] = []
-    # Population lineage for the judge meta-validation set (see docs/RESULTS.md):
+    # Population lineage for the judge meta-evaluation set (see docs/RESULTS.md, docs/DATA.md):
     #   627  all (row x tool) pairs with a 0/1 desirability label   [data.load_manual_labels]
-    #    |   (1) drop punts            -- a DATA FACT (lab.is_punt): the tool left the conflict
-    #    |                               unresolved, i.e. a detection event, not a resolution.
-    #    |   (2) drop empty regions    -- a JUDGEABILITY filter: candidate or developer came out
-    #    |                               empty, so there is nothing to compare (and GEval rejects
-    #    v                               empty actual_output).
-    #   303  judgeable cases fed to the GEval judge. 
+    #    |   (1) drop punts              -- a DATA FACT (lab.is_punt): the tool left the conflict
+    #    |                                 unresolved, i.e. a detection event, not a resolution.
+    #    |   (2) drop file-level scenarios -- a SCENARIO-LEVEL filter: ConflictBench provides no
+    #    |                                 complete base/left/right 3-way for this file (an
+    #    |                                 add/delete/rename op), so the conflict itself is
+    #    |                                 ill-defined -- the merged block and the child can only
+    #    |                                 come from the xlsx as noise. Drop the whole scenario
+    #    |                                 (all its tools), not per-pair.
+    #    |   (3) drop empty regions      -- a JUDGEABILITY filter: candidate or developer came out
+    #    |                                 empty, so there is nothing to compare (and GEval rejects
+    #    v                                 empty actual_output).
+    #   292  judgeable cases fed to the GEval judge.
+    _three_way: dict[tuple[str, str], bool] = {}
+    def _has_three_way(project: str, commit: str) -> bool:
+        key = (project, commit)
+        if key not in _three_way:
+            files = data.load_scenario_files(project, commit)
+            _three_way[key] = {"base", "left", "right"} <= files.keys()
+        return _three_way[key]
+
     for lab in labels:
         if lab.is_punt:
             continue  # (1) data fact: detection event, not a desirability judgment
+        if not _has_three_way(lab.project, lab.commit):
+            continue  # (2) file-level add/delete/rename scenario: no 3-way to reconstruct, the
+            #         conflict is ill-defined -- drop the whole scenario (see docs/DATA.md)
         ji = pairs.build_judge_inputs(lab)
         if not ji.candidate.strip() or not ji.developer.strip():
-            continue  # (2) judgeability: empty region (xlsx deletion, or a file-source region the
-            #         anchor lost to a repack/rename) -- nothing to judge; empty actual_output errors GEval
+            continue  # (3) judgeability: empty region -- nothing to judge; empty actual_output errors GEval
         cases.append(
             LLMTestCase(
                 input=ji.conflict,

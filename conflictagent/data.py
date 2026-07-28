@@ -184,9 +184,20 @@ def clean_xlsx_snippet(s: str) -> str:
     Version snippets (LEFT/RIGHT/CHILD) are unified diffs (@@ headers, +/- lines): apply them
     (drop '-' and '@@', strip the leading diff column from '+'/context). Tool snippets are
     already clean code: return as-is.
+
+    is_diff also fires on a pure-add / context-only hunk (no '@@' and no '-' line): it still
+    needs its leading diff column stripped, but the '@@'-or-'-' heuristic used to miss it and
+    left '+' markers in the output. The all()-guard keeps this from misfiring on already-clean
+    code or markdown bullets -- if any non-blank line does not start with a diff column
+    (space/+/-), the snippet is treated as clean and returned as-is.
     """
     lines = (s or "").splitlines()
-    is_diff = any(l.startswith("@@") for l in lines) or any(l.startswith("-") for l in lines)
+    nb = [l for l in lines if l.strip()]
+    is_diff = (
+        any(l.startswith("@@") for l in lines)
+        or any(l.startswith("-") for l in lines)
+        or (bool(nb) and all(l[0] in " +-" for l in nb) and any(l[0] == "+" for l in nb))
+    )
     if not is_diff:
         return s or ""
     out = []
