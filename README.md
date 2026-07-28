@@ -11,14 +11,20 @@ five traditional merge-tool baselines; ConflictAgent supplies the LLM agent and 
 
 ## Current Status
 
-Complete as of the 2026-06-09 milestone.
+Current as of the 2026-07 DeepEval + pipeline-hardening iteration.
 
 - Reconstructable Java scenarios: 93 of 106 Java ConflictBench scenarios.
-- Solvers: OpenAI `gpt-5.4-2026-03-05` and Gemini `gemini-3.5-flash`.
-- Judge: Anthropic `claude-sonnet-4-6`, calibrated against ConflictBench human labels.
-- Developer-match judge calibration: n=310, accuracy 70.6%, precision 92.9%, recall 55.6%.
-- On true conflicts, LLM solvers score about 62-66% developer-match, above the strongest of the
-  five traditional tools at <=52% under the human-label tool view.
+- Solvers: OpenAI `gpt-5.4-2026-03-05` and Gemini `gemini-3.5-flash` (forced-resolution mode).
+- Judge: Anthropic `claude-sonnet-4-6`, reimplemented as a DeepEval GEval metric, calibrated
+  against ConflictBench human labels.
+- Judge calibration (Dataset A, n=292): **precision 100%** (zero false accepts), recall 64.6%.
+- Solver developer-match on true conflicts: **≈55%** (conservative floor across providers; pooled
+  58.3%). LLM vs the five traditional tools (coverage-fair, n=49 true): LLM 55–59% vs strongest tool
+  AutoMerge 36.7% — the edge is coverage (tools abstain heavily; the LLM under forced resolution
+  does not).
+- Structural validity on true conflicts: 95.8%.
+- The agent also supports a detection mode (predict "true conflict" and abstain), validated in the
+  earlier milestone; it is not part of the current GEval-scored headline.
 
 ## Architecture
 
@@ -73,8 +79,8 @@ python scripts/smoke_test_llm.py
 Run evaluation:
 
 ```bash
-python scripts/run_eval.py --scheme A --providers openai gemini
-python scripts/run_eval.py --scheme B --providers openai gemini --no-baselines
+python scripts/run_eval.py --scheme A --providers openai gemini   # Scheme A = forced resolution (primary, current)
+python scripts/run_eval.py --scheme B --providers openai gemini --no-baselines   # Scheme B = detection mode (may punt); supported, not in current headline
 ```
 
 Recover specific failed scenarios:
@@ -83,17 +89,22 @@ Recover specific failed scenarios:
 python scripts/run_eval.py --scheme A --providers gemini --only-ids Terasology@abcd1234
 ```
 
-Compare LLMs with the five ConflictBench tools:
+Compare the LLM with the five ConflictBench tools (coverage-fair, scored by the same GEval judge):
 
 ```bash
-python scripts/compare_tools.py --scheme A
-python scripts/compare_tools.py --scheme B
+python scripts/compare_tools_geval.py
 ```
 
-Calibrate the developer-match judge:
+Score solver resolutions with the DeepEval suite (① GEval developer-match + ② structural validity):
 
 ```bash
-python scripts/calibrate_judge.py
+python -m evaluation.run_solver_eval
+```
+
+Validate the judge against human labels (Dataset A meta-evaluation, n=292):
+
+```bash
+python -m evaluation.run_suite
 ```
 
 ## Repository Layout

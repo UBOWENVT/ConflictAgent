@@ -6,18 +6,23 @@ These examples come from the saved evaluation records:
 - `outputs/eval/eval_B_complete.jsonl`
 
 They are meant as conversation anchors. The eval files store metric outcomes, not full candidate
-code, so these case studies focus on what each case demonstrates about the evaluation design. To
+code, so these case studies focus on what each case demonstrates about the evaluation *design*. To
 turn any item into a code-level walkthrough, use the scenario ID to inspect `data/scenarios/` and
 the selected diff3 block.
+
+Note on verdicts: the `dev_match` values in these tables are saved records used to illustrate
+evaluation-design points (why baselines, standalone vs developer-match, detection, extraction
+guards). Those design points are judge-agnostic. The current headline numbers come from the GEval
+judge (see RESULTS.md); individual per-case verdicts here are anchors, not the reported figures.
 
 ## How To Read The Fields
 
 - `valid_conflict`: ConflictBench human label. `True` means a genuine conflict; `False` means a
   mechanically resolvable conflict.
-- `dev_match`: calibrated judge says the model's resolution is acceptable relative to the
-  developer's actual resolution.
+- `dev_match`: the ① judge says the model's resolution is acceptable relative to the developer's
+  actual resolution (① = GEval in the current suite).
 - `standalone`: judge says the model's resolution is reasonable from base/left/right alone. This is
-  meaningful as a correctness metric only for `valid_conflict=False`.
+  meaningful as a correctness metric only for `valid_conflict=False` (retained secondary metric).
 - `final_valid`: after splicing the candidate into the reconstructed file, the validation layer
   accepts it.
 - `dev_status`: whether the developer resolution could be safely extracted from `child`.
@@ -64,7 +69,9 @@ case behind the headline that LLMs outperform traditional tools on true conflict
 
 ## 3. `Matisse@93d0051c`: Scheme B Punt / Detection
 
-Why this case is useful: it explains detection precision and abstention.
+Why this case is useful: it explains detection precision and abstention. Scheme B is a
+detection / robustness *variant*, reported as a separate capability — it is NOT the scored headline
+(that is Scheme A). See SPEC.md → Prompt Schemes.
 
 From scheme B:
 

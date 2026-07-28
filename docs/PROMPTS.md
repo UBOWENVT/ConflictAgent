@@ -2,7 +2,8 @@
 
 本文件 = 实际发给 solver LLM (OpenAI / Gemini) 的全部内容，逐字。
 来源：`conflictagent/solver.py` 的 `SYSTEM_A` / `SYSTEM_B` + `build_prompt()` + `build_window()`。
-判官 (judge) 用的是另一套提示词，在 `judge.py`，不在本文件范围。
+判官 (judge) 是另一套：当前用 GEval（DeepEval），判据来自 `judge.py` 的 JUDGE_SYSTEM 规则、由
+`evaluation/metrics.py` 的 ① ResolutionAcceptability 承接，不在本文件范围。
 
 2026-06-08 重定向后的两个变化：
 1. **上下文 = 窗口**（不再整文件）：文件骨架（package + import 区 + 类声明行）+ 包住目标块的最小完整大括号作用域；文件小（≤ `config.WINDOW_FULLFILE_MAX_LINES`，当前 400 行）则仍发整文件。窗口只是**给模型看的内容**；校验和回填（splice）始终在完整重建文件上做，所以窗口不会污染解。

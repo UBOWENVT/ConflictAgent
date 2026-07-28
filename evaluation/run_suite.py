@@ -1,9 +1,10 @@
 """Run the DeepEval suite — Phase 1: ③ judge meta-evaluation.
 
-Runs the ① Resolution Acceptability (GEval) judge over the 303 human-labeled desirability cases
-and compares its accept/reject verdicts to the human labels: a confusion matrix (accuracy /
-precision / recall) plus a dump of disagreements with the judge's own reason (failure-mode
-analysis). This is the DeepEval-native re-measurement of judge credibility.
+Runs the ① Resolution Acceptability (GEval) judge over the 292 gradeable desirability cases
+(the Scheme-A funnel: 900 → 627 labeled → drop punts/file-level/empty → 292; see docs/DATA.md and
+scripts/diagnostics/judge_funnel_provenance.py) and compares its accept/reject verdicts to the human
+labels: a confusion matrix (accuracy / precision / recall) plus a dump of disagreements with the
+judge's own reason (failure-mode analysis). This is the DeepEval-native re-measurement of judge credibility.
 
 The numbers are whatever GEval produces. This is a MORE-informed judge than the original (it also
 sees the conflict block), so the figures are not expected to match the hand-built calibration —
@@ -12,7 +13,7 @@ and per the project decision that is fine; new real numbers are the point.
 Cost: one Claude judge call per case. Use --limit for a cheap pipeline check first.
 
     python evaluation/run_suite.py --limit 20      # ~20 calls, validate the pipeline
-    python evaluation/run_suite.py                 # full 303 calls
+    python evaluation/run_suite.py                 # full 292 calls
 
 Design note: this uses a manual per-case loop rather than deepeval.evaluate() because ③ needs a
 custom join of judge verdict vs human label (a confusion matrix + disagreement dump), which the

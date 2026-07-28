@@ -18,7 +18,7 @@ The data directory is gitignored.
   count reflects the corrected classification. The reclassification has no effect on any computed
   result -- orientdb is already excluded upstream as no_conflict.)
 - 106 Java scenarios.
-- 93 reconstructable Java scenarios with base/left/right available.
+- 93 reconstructable Java scenarios with base/left/right file available.
 
 ## Versions
 
@@ -49,9 +49,9 @@ The `Developper` spelling is from the source file and is intentionally preserved
 
 ## Snippet Gotchas
 
-Version snippets such as LEFT/RIGHT/CHILD are unified-diff-like snippets, not always clean final
-code. Tool snippets are usually clean code. Prefer complete files when possible; use cleaned xlsx
-snippets only as fallback.
+In ConflictBench.xlsx, Version snippets such as LEFT/RIGHT/CHILD are unified-diff-like snippets, 
+not always clean final code. Tool snippets are usually clean code. Prefer complete files 
+when possible; use cleaned xlsx snippets only as fallback.
 
 ## Target Block Selection
 
@@ -123,11 +123,51 @@ only `result.txt` (human-added to run the tool) or only a `.merge` intermediate 
 
 **Why ConflictAgent does NOT relabel or re-run (proven zero impact):** all 62 "generate nothing"
 pairs are already excluded from the judge set as empty-region drops; relabeling 0->N/A only swaps
-which filter removes them — they never enter the n=303 set either way, so precision (100%),
-recall (61.7%), and the headline stay unchanged. The 2 mislabels are likewise currently excluded
+which filter removes them — they never enter the n=292 set either way, so precision (100%),
+recall (64.6%), and the headline stay unchanged. The 2 mislabels are likewise currently excluded
 (empty xlsx snippet); fixing them would additionally require repairing the nested-path extraction
 (FSTMerge output lives at `FSTMerge/merge/<full/path>/File.ext`, never found by the flat-name
 loader) and would add just 2 pairs to ~305. Documented for traceability.
+
+## Judge-line input pipeline (Scheme A, 2026-07): file-level gate, is_diff fix, residual scope-mismatch
+
+The judge meta-evaluation funnel (`build_metaevaluation_testcases`) is
+`627 → −253 punt → −22 file-level → −60 empty → 292`. Two 2026-07 changes hardened the input
+pipeline; both are ConflictAgent-side and leave the raw ConflictBench xlsx untouched.
+
+**(1) Scenario-level file-level gate ("B gate").** A conflict is judgeable only if ConflictBench
+provides a complete `base`/`left`/`right` 3-way for the file. When any of the three is missing the
+scenario is a file-level `add` / `delete` / `rename` / `add-add` operation (23 scenarios: 13 Java +
+10 non-Java), with no reconstructable in-file conflict — its xlsx merged/child are git messages
+(`--- a/`, `+++ /dev/null`, `rename ...`) or whole-file blobs, not a region resolution. The gate
+(`{"base","left","right"} <= load_scenario_files(...).keys()`, scenario-level, all five tools) drops
+them. This is the SAME structural check the solver line applies at 106→93. The missing-version
+signature also classifies the operation: base+left present / right missing = right deleted;
+base+right / left missing = left deleted; base missing / left+right present = add-add;
+base+left missing / right present = rename.
+
+**(2) is_diff fix in `clean_xlsx_snippet`.** The xlsx CHILD/tool snippets are unified-diff-like. The
+old is_diff heuristic (`any '@@' or any '-' line`) missed *pure-add / context-only* hunks (no `-`,
+no `@@`), returning them verbatim with a `+` on every added line — so `+`-prefixed "developer" text
+reached the judge. The fix treats a hunk as a diff when every non-blank line is a diff column
+(space/+/-) and at least one is a `+`, guarded so it never mis-strips already-clean code or markdown
+bullets. This recovered 39 pure-add inputs (each becomes clean code once the diff column is
+stripped), lifting judge recall 61.7 → 64.6 with precision unchanged at 100%.
+
+Together these two account for the earlier "48 contaminated judge inputs": 9 are genuine non-code
+git messages (dropped by the B gate as file-level ops) and 39 are recoverable pure-add code (cleaned
+by the is_diff fix).
+
+**Residual known limitation (documented, not fixed): scope-mismatched xlsx pairs.** A minority of
+xlsx pairs record the candidate and developer at inconsistent scopes/windows — e.g.
+`incubator-shardingsphere@7fe148b3`, where the developer is a 2-line diff window while the
+IntelliMerge candidate is the full 24-line import block; or `jjwt@3f079803`, where the child is the
+whole 29-line file vs an 8-line merged region. Comparing across mismatched spans can only make the
+judge *reject* a valid resolution (depressing recall), never produce a false accept, so precision
+stays 100%. There is no clean automatic detector (a candidate/developer size-ratio screen flags ~45
+pairs, most of which are legitimate large tool-vs-developer resolution differences, not recording
+defects), so these are left in and documented rather than hand-excluded — consistent with the
+conservative-lower-bound framing.
 
 ## Known data edge case: EOL-induced false conflict (orientdb@501dac79)
 
