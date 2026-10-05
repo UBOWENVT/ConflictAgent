@@ -31,7 +31,7 @@ conflictagent.agent
   -> validate and retry   (② structural gate, inference-time)
 
 evaluation.dataset            (DeepEval test-case builder)
-  -> build_metaevaluation_testcases: 900 labeled points
+  -> build_metaevaluation_testcases: 900-cell label grid (180 scenarios x 5 tools), 627 labeled
      -> scenario-level 3-way gate (Scheme A: base/left/right present)
      -> is_diff-corrected xlsx snippet cleaning
      -> n = 292 gradeable meta-eval cases (Dataset A)
@@ -40,7 +40,7 @@ evaluation.metrics            (the two DeepEval metrics)
   -> ① ResolutionAcceptability (GEval, DeepEval built-in, our criteria)
   -> ② StructuralValidity      (our custom BaseMetric, reuses validate.py)
 
-evaluation.run_suite          -> ③ judge meta-evaluation (① vs human labels, n=292)
+evaluation.run_suite          -> ③ judge meta-evaluation (① vs human labels on tool resolutions, n=292)
 evaluation.run_solver_eval    -> Dataset B: ① + ② over the solver line
 scripts/compare_tools_geval.py-> LLM vs ConflictBench's five tools, same ① judge
 ```
@@ -59,7 +59,7 @@ scripts/compare_tools_geval.py-> LLM vs ConflictBench's five tools, same ① jud
 
 ### Evaluation layer (DeepEval)
 
-- `evaluation/dataset.py`: builds DeepEval `LLMTestCase`s. `build_metaevaluation_testcases` applies the scenario-level 3-way gate (Scheme A) and the is_diff-corrected snippet cleaning; yields n=292 gradeable meta-eval cases from 900 labeled points.
+- `evaluation/dataset.py`: builds DeepEval `LLMTestCase`s. `build_metaevaluation_testcases` applies the scenario-level 3-way gate (Scheme A) and the is_diff-corrected snippet cleaning; yields n=292 gradeable meta-eval cases from the 900-cell label grid (627 labeled).
 - `evaluation/metrics.py`: the two metrics. ① `ResolutionAcceptability` = GEval (DeepEval built-in LLM-as-judge, our criteria lifted from `judge.py`). ② `StructuralValidity` = our custom `BaseMetric` subclass, deterministic, no LLM, reusing `validate.py`. ② reads the spliced full file from `test_case.metadata['spliced_file']`; ① ignores metadata.
 - `evaluation/run_suite.py`: ③ judge meta-evaluation — runs ① over the labeled cases, confusion matrix vs human labels (precision/recall + disagreement dump).
 - `evaluation/run_solver_eval.py`: Dataset B — runs ① + ② over the solver line, stratified by conflict type and provider. ② does NOT gate ①.
@@ -72,7 +72,9 @@ Current (DeepEval evaluation):
 
 - `scripts/fetch_data.py`: download xlsx and reconstructable scenario files.
 - `scripts/smoke_test_llm.py`: verify provider keys and model IDs.
-- `scripts/run_agent.py`: run the solver agent to produce resolutions.
+- `scripts/run_eval.py --scheme A --no-judge`: run the solver agent over all reconstructable Java scenarios and save each final resolution (`--no-judge` skips the script's legacy built-in judge).
+- `evaluation/build_complete_set.py`: merge the solver runs into one record per scenario × provider.
+- `scripts/verify_numbers.py`: recompute the reported figures from the frozen files in `results/` (no LLM calls).
 - `evaluation/run_suite.py`: ③ judge meta-evaluation (① vs human labels, n=292 → P=100% / R=64.6%).
 - `evaluation/run_solver_eval.py`: Dataset B — score solver outputs with ① + ②.
 - `scripts/compare_tools_geval.py`: LLM vs the five ConflictBench tools under the same ① judge.
@@ -80,7 +82,7 @@ Current (DeepEval evaluation):
 
 Historical (hand-built-judge era, superseded — kept for provenance, see DEVELOPMENT_LOG):
 
-- `scripts/run_eval.py`, `scripts/calibrate_judge.py`, `scripts/sample_standalone_calibration.py`, `scripts/compare_tools.py`, `scripts/run_baseline.py`, `scripts/merge_recovery.py`.
+- `scripts/run_agent.py` (early loop-only runner), `scripts/calibrate_judge.py`, `scripts/sample_standalone_calibration.py`, `scripts/compare_tools.py`, `scripts/run_baseline.py`, `scripts/merge_recovery.py`; and `scripts/run_eval.py`'s own judge summary (when run without `--no-judge`).
 
 ## Validation Boundary
 
@@ -94,7 +96,7 @@ If a file still contains other unresolved conflict blocks after replacing the ta
 Java parsing is not possible. In that multi-block case, the agent accepts a marker-free target
 resolution and leaves semantic scoring to evaluation.
 
-The same three checks are metric ②'s gen-time role. ② appears twice — an inference-time gate here (retry ≤4, else abstain) and a reported metric at eval time — but only on the solver line; the judge line (Dataset A) never builds a spliced full file, so ② does not run there.
+The same three checks are metric ②'s gen-time role. ② appears twice — an inference-time gate here (at most 4 rounds; if none passes, the last attempt is returned with `final_valid=False` rather than withheld) and a reported metric at eval time — but only on the solver line; the judge line (Dataset A) never builds a spliced full file, so ② does not run there.
 
 ## Evaluation Boundary
 
@@ -103,6 +105,6 @@ Evaluation may use:
 - `child` developer files;
 - xlsx human labels;
 - tool strategy/desirability labels;
-- ① GEval judge outputs (validated against human labels: P=100% / R=64.6%, n=292).
+- ① GEval judge outputs (validated against human labels on tool resolutions: P=100% / R=64.6%, n=292).
 
 None of those signals can flow back into `agent.resolve`.

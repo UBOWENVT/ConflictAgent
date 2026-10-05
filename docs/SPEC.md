@@ -9,13 +9,13 @@ ConflictAgent measures how well modern LLMs resolve real Java merge conflicts fr
 The project combines:
 
 - a solver agent that generates and validates candidate resolutions without seeing ground truth;
-- a GEval (DeepEval) LLM-as-judge, validated against ConflictBench human labels (precision 100% / recall 64.6%, n=292);
-- comparisons against trivial baselines and the five traditional ConflictBench merge tools.
+- a GEval (DeepEval) LLM-as-judge, validated against ConflictBench's human labels on the tools' resolutions (precision 100% / recall 64.6%, n=292);
+- a comparison against the five traditional ConflictBench merge tools (trivial baselines were used in an earlier milestone).
 
 ## Data
 
-ConflictBench has 180 textual merge scenarios: 135 true conflicts and 45 false conflicts
-(orientdb@501dac79 reclassified true → false; see DATA.md). There are 106 Java scenarios; 93 are
+ConflictBench has 180 textual merge scenarios, published as 136 true and 44 false conflicts; this
+project reclassifies one (orientdb@501dac79, true → false; see DATA.md), giving 135 / 45. There are 106 Java scenarios; 93 are
 reconstructable from complete base/left/right files and are the primary solver-evaluation set.
 
 Each scenario has:
@@ -78,7 +78,7 @@ Primary (the two-metric suite):
 - ① `developer-match` (ResolutionAcceptability, GEval): the validated LLM judge decides whether the
   candidate is an acceptable semantic match for the developer resolution. Valid for true and false
   conflicts; the true-conflict rate is the headline. Judge credibility itself: precision 100% /
-  recall 64.6% (n=292) vs human labels.
+  recall 64.6% (n=292) vs human labels on tool resolutions.
 - ② `structural-validity` (deterministic, no LLM): no leftover markers, parses via `javalang`, no
   over-scoped duplicate declarations. Reported independently — ② does NOT gate ①.
 
@@ -89,8 +89,10 @@ Secondary / retained:
   supplementary measure; raw data kept.
 - `detection`: Scheme B only. Punt is treated as predicting a true conflict — a robustness capability,
   not part of the A headline.
-- `confidence calibration`: developer-match rate by model self-reported confidence.
-- trivial baselines: `pick-left`, `pick-right`, `pick-longer`, `union`.
+- `confidence calibration`: developer-match rate by model self-reported confidence (earlier milestone,
+  hand-built judge; not re-scored by the DeepEval suite).
+- trivial baselines: `pick-left`, `pick-right`, `pick-longer`, `union` (earlier milestone, hand-built
+  judge; not re-scored by the DeepEval suite).
 
 Deprecated metrics:
 
@@ -119,7 +121,7 @@ The pipeline is complete and reimplemented on DeepEval (June–July 2026):
 - ① GEval judge validated vs human labels (P=100% / R=64.6%, n=292);
 - ② structural-validity metric (≈95.8%);
 - solver-line evaluation (Dataset B) with ① + ②;
-- LLM versus five-tool comparison under the same ① judge (LLM ≈55% conservative floor vs 55–59% tools; AutoMerge 36.7%).
+- LLM versus five-tool comparison under the same ① judge (true conflicts, n=49: LLM 55–59% vs strongest tool AutoMerge 38.8%; the tools leave 20–92% unresolved).
 
 The hand-built judge (2026-06) is superseded; see DEVELOPMENT_LOG.
 

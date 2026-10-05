@@ -2,13 +2,13 @@
 
 Scores every solver resolution in the complete set with BOTH metrics:
   ① Resolution Acceptability (GEval, LLM judge) — does the solver's resolution match what the
-     developer actually did? This is the headline: the developer-match acceptance rate.
+     developer actually did? The reported figure is the true-conflict rate (floor across providers).
   ② Structural Validity (deterministic, no LLM) — no leftover markers; parses (javalang); no
      over-scoped duplicate declarations.
 
 The two are reported INDEPENDENTLY (② does NOT gate ①): ① is the semantic headline, ② is a
 structural-soundness floor. Results are stratified by conflict type (true = headline) and provider.
-This is the DeepEval re-measurement that supersedes the hand-built-judge 62-66% developer-match.
+This is the DeepEval re-measurement that supersedes the earlier hand-built-judge figures.
 
 Cost: one Claude judge call (①) per case; ② is free. Use --limit for a cheap pipeline check first.
 
@@ -124,7 +124,8 @@ def _report(tallies: dict, errors: int, out_path: Path) -> None:
             log.info(f"  {prov + ' ' + label:14}{t['n']:>4}   "
                      f"{_rate(t['accept'], t['n']):>15}   {_rate(t['valid'], t['n']):>15}")
 
-    # headline: true conflicts, both providers pooled (the resume number)
+    # true conflicts pooled over providers. The reported developer-match figure is the per-provider
+    # floor (the lower provider, printed below), not this pooled rate.
     ht = {"n": 0, "accept": 0, "valid": 0}
     for (p, vc), t in tallies.items():
         if vc is True:
@@ -132,9 +133,12 @@ def _report(tallies: dict, errors: int, out_path: Path) -> None:
             ht["accept"] += t["accept"]
             ht["valid"] += t["valid"]
     log.info("  " + "-" * 54)
-    log.info(f"  {'HEADLINE true':14}{ht['n']:>4}   "
-             f"{_rate(ht['accept'], ht['n']):>15}   {_rate(ht['valid'], ht['n']):>15}   "
-             f"<- supersedes hand-judge 62-66%")
+    log.info(f"  {'POOLED true':14}{ht['n']:>4}   "
+             f"{_rate(ht['accept'], ht['n']):>15}   {_rate(ht['valid'], ht['n']):>15}")
+    per = [(t["accept"] / t["n"], p) for (p, vc), t in tallies.items() if vc is True and t["n"]]
+    if per:
+        floor, who = min(per)
+        log.info(f"  reported developer-match (true) = floor across providers: {floor:.1%} ({who})")
     log.info(f"\n  per-case records -> {out_path}")
 
 

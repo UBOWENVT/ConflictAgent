@@ -1,11 +1,15 @@
 # Case Studies
 
-These examples come from the saved evaluation records:
+These examples come from the saved evaluation records of the earlier milestone runs (local files,
+not in the repository):
 
-- `outputs/eval/eval_A_complete.jsonl`
-- `outputs/eval/eval_B_complete.jsonl`
+- `outputs/eval/_archive/eval_A_complete_LEGACY.jsonl` (Scheme A, June 2026)
+- `outputs/eval/_archive/eval_B_complete.jsonl` (Scheme B)
 
-They are meant as conversation anchors. The eval files store metric outcomes, not full candidate
+The current Scheme A runs used for the reported figures differ on some cases (for example, in the current runs OpenAI resolves
+`mybatis-3@3502f7ce` with a different strategy).
+
+They illustrate the evaluation design. The eval files store metric outcomes, not full candidate
 code, so these case studies focus on what each case demonstrates about the evaluation *design*. To
 turn any item into a code-level walkthrough, use the scenario ID to inspect `data/scenarios/` and
 the selected diff3 block.
@@ -19,8 +23,8 @@ judge (see RESULTS.md); individual per-case verdicts here are anchors, not the r
 
 - `valid_conflict`: ConflictBench human label. `True` means a genuine conflict; `False` means a
   mechanically resolvable conflict.
-- `dev_match`: the ① judge says the model's resolution is acceptable relative to the developer's
-  actual resolution (① = GEval in the current suite).
+- `dev_match`: the developer-match verdict stored in those records, from the earlier hand-built
+  judge (the current suite's GEval judge ① and its figures are in RESULTS.md).
 - `standalone`: judge says the model's resolution is reasonable from base/left/right alone. This is
   meaningful as a correctness metric only for `valid_conflict=False` (retained secondary metric).
 - `final_valid`: after splicing the candidate into the reconstructed file, the validation layer
@@ -44,7 +48,7 @@ From scheme A:
 | pick-longer | False | True | n/a | n/a |
 | union | False | False | n/a | n/a |
 
-Talking point: a simple heuristic can produce something that looks plausible in isolation
+Takeaway: a simple heuristic can produce something that looks plausible in isolation
 (`standalone=True`) but still misses the developer's actual merge intent (`dev_match=False`). Both
 LLMs produced an acceptable developer-match resolution here.
 
@@ -63,9 +67,9 @@ From scheme A:
 | pick-longer | False | False | n/a | n/a |
 | union | False | False | n/a | n/a |
 
-Talking point: `valid_conflict=True` means this is not just a mechanical keep-both case. The
+Takeaway: `valid_conflict=True` means this is not just a mechanical keep-both case. The
 trivial baselines miss it, while both LLMs produce developer-match resolutions. This is the kind of
-case behind the headline that LLMs outperform traditional tools on true conflicts.
+case where the LLMs add value over simple heuristics on true conflicts.
 
 ## 3. `Matisse@93d0051c`: Scheme B Punt / Detection
 
@@ -80,7 +84,7 @@ From scheme B:
 | OpenAI | True | punt | True | n/a | n/a |
 | Gemini | True | punt | True | n/a | n/a |
 
-Talking point: scheme B allows the model to say "this is a true conflict; do not auto-resolve."
+Takeaway: scheme B allows the model to say "this is a true conflict; do not auto-resolve."
 Here both solvers punted, and the human `Valid Conflict` label agrees. That counts as a correct
 detection event, not as a resolution. Across the full run, punts were rare but precise.
 
@@ -99,9 +103,9 @@ From scheme A:
 | pick-longer | False | True | n/a | n/a |
 | union | False | False | n/a | n/a |
 
-Talking point: sometimes the developer really chose one side, and a trivial side-picking baseline
+Takeaway: sometimes the developer really chose one side, and a trivial side-picking baseline
 captures that. Both LLMs produced a reasonable merge in isolation, but not the developer-match
-answer. This is why the project reports baselines instead of only raw LLM accuracy.
+answer. This is why the earlier milestone compared against baselines instead of reporting raw LLM accuracy alone.
 
 ## 5. `RxJava@45c9dc85`: Standalone Is Not Enough
 
@@ -119,7 +123,7 @@ From scheme A:
 | pick-longer | False | True | n/a | n/a |
 | union | False | False | n/a | n/a |
 
-Talking point: several candidates look reasonable from the isolated conflict (`standalone=True`),
+Takeaway: several candidates look reasonable from the isolated conflict (`standalone=True`),
 but they do not match the developer answer. OpenAI also fails final validation after splice
 (`final_valid=False`). This is the concrete reason final validation and developer-match are both
 needed.
@@ -135,7 +139,7 @@ From scheme A:
 | OpenAI | False | anchor_not_unique | n/a | True | True |
 | Gemini | False | anchor_not_unique | n/a | True | True |
 
-Talking point: the agent can produce and validate a resolution, but the evaluation layer refuses to
+Takeaway: the agent can produce and validate a resolution, but the evaluation layer refuses to
 guess the developer's corresponding region if context anchors are not unique. Those scenarios are
 excluded from developer-match denominators. This is a data-integrity guard, not a model failure.
 
@@ -152,22 +156,20 @@ From scheme A:
 | pick-left | False | True | True | n/a | n/a |
 | pick-longer | False | True | True | n/a | n/a |
 
-Talking point: even on `valid_conflict=False`, "keep both sides" is not always correct. The
-developer-compatible solution was closer to a side-picking baseline. This is a good example for
-explaining why the evaluation separates false conflicts from true conflicts and still compares
+Takeaway: even on `valid_conflict=False`, "keep both sides" is not always correct. The
+developer-compatible solution was closer to a side-picking baseline. This shows why the evaluation
+separates false conflicts from true conflicts and still compares
 against trivial baselines.
 
-## Good Conversation Framing
-
-Use these examples to explain the project in layers:
+## Summary
 
 1. `dubbo` / `error-prone`: LLMs can beat simple heuristics.
-2. `Matisse`: punt is a detection event, not a failed resolution.
+2. `Matisse`: a Scheme B punt is the agent declaring a true conflict, not a failed resolution.
 3. `mybatis-3` / `cat`: baselines are necessary because LLMs can over-merge.
 4. `RxJava`: standalone-valid and final-valid answer different questions.
 5. `proxyee-down`: denominators are guarded by extraction safety.
 
-The core message is not "LLMs solve every merge conflict." It is: with a clean evaluation harness,
-modern LLMs outperform traditional tools on many true conflicts, but the result only becomes
-credible because the project also reports baselines, abstention behavior, validation failures, and
+The point is not that LLMs solve every merge conflict. On true conflicts the LLMs score above the
+traditional tools mainly because they attempt every case, and that result is only credible because
+the project also looks at baselines (earlier milestone), Scheme B punts, validation failures, and
 ground-truth extraction limits.

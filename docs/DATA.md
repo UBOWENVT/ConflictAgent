@@ -94,12 +94,13 @@ cause splits four ways (see `scripts/diagnostics/classify_anchors.py`, and
 
 In every case the guard excludes rather than guesses, so excluded scenarios never
 contribute a possibly-wrong developer-match. Net effect: the developer-match
-denominator is a conservative subset (72 of 93 in Scheme A), not a biased one.
+denominator is a conservative subset (72 of 93 in Scheme A). The excluded scenarios are not a
+random sample, so the rates describe the gradeable subset.
 
-## Detection Errata
+## Unresolved-output label errata
 
-Four tool detection labels are corrected in `conflictagent/data.py` through
-`_DETECTION_OVERRIDES`. The xlsx is left unchanged; the code layers file-grounded corrections on
+Four tool labels for whether the output still contains conflict markers (ConflictBench's
+"detection" category) are corrected in `conflictagent/data.py` through `_DETECTION_OVERRIDES`. The xlsx is left unchanged; the code layers file-grounded corrections on
 top of the original Strategy column.
 
 ## FSTMerge detection classification & known labeling gaps (2026-07-25 audit)
@@ -112,7 +113,7 @@ top of the original Strategy column.
 > upstream in ConflictBench, not here.
 
 **Ideal Detection-vs-Resolution rule:** a tool output is a scored Resolution only if the FINAL
-target file exists AND has no conflict markers; markers present -> Detection (desirability N/A);
+target file exists AND has no conflict markers; markers present -> Detection, ConflictBench's term for an output left unresolved (desirability N/A);
 only `result.txt` (human-added to run the tool) or only a `.merge` intermediate -> Not Applied.
 
 **How ConflictBench's labels diverge from this ideal rule (FSTMerge):**
@@ -127,12 +128,12 @@ which filter removes them — they never enter the n=292 set either way, so prec
 recall (64.6%), and the headline stay unchanged. The 2 mislabels are likewise currently excluded
 (empty xlsx snippet); fixing them would additionally require repairing the nested-path extraction
 (FSTMerge output lives at `FSTMerge/merge/<full/path>/File.ext`, never found by the flat-name
-loader) and would add just 2 pairs to ~305. Documented for traceability.
+loader) and would add just 2 pairs to the judged set. Documented for traceability.
 
 ## Judge-line input pipeline (Scheme A, 2026-07): file-level gate, is_diff fix, residual scope-mismatch
 
 The judge meta-evaluation funnel (`build_metaevaluation_testcases`) is
-`627 → −253 punt → −22 file-level → −60 empty → 292`. Two 2026-07 changes hardened the input
+`627 → −253 unresolved (tool output still has conflict markers) → −22 file-level → −60 empty → 292`. Two 2026-07 changes hardened the input
 pipeline; both are ConflictAgent-side and leave the raw ConflictBench xlsx untouched.
 
 **(1) Scenario-level file-level gate ("B gate").** A conflict is judgeable only if ConflictBench
@@ -162,9 +163,9 @@ by the is_diff fix).
 xlsx pairs record the candidate and developer at inconsistent scopes/windows — e.g.
 `incubator-shardingsphere@7fe148b3`, where the developer is a 2-line diff window while the
 IntelliMerge candidate is the full 24-line import block; or `jjwt@3f079803`, where the child is the
-whole 29-line file vs an 8-line merged region. Comparing across mismatched spans can only make the
-judge *reject* a valid resolution (depressing recall), never produce a false accept, so precision
-stays 100%. There is no clean automatic detector (a candidate/developer size-ratio screen flags ~45
+whole 29-line file vs an 8-line merged region. Comparing across mismatched spans tends to make the
+judge *reject* a valid resolution (depressing recall); no false accepts were observed on the judged
+set (FP=0). There is no clean automatic detector (a candidate/developer size-ratio screen flags ~45
 pairs, most of which are legitimate large tool-vs-developer resolution differences, not recording
 defects), so these are left in and documented rather than hand-excluded — consistent with the
 conservative-lower-bound framing.
