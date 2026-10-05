@@ -20,9 +20,9 @@ Population lineage:
 900  label grid = 180 scenarios x 5 tools
  |   -273  no label      (that (scenario,tool) has no 0/1 desirability label -- N/A)
 627  (row x tool) pairs with a 0/1 desirability label          [data.load_manual_labels]
- |   -253  punts         (lab.is_punt: tool left the conflict unresolved = a detection
- |                        event, not a resolution -- a DATA FACT)
-374  non-punt desirability pairs
+ |   -253  unresolved    (lab.is_punt: the tool's output still contains conflict markers,
+ |                        so there is no resolution to grade)
+374  resolved desirability pairs
  |   -22   file-level     (add/del/rename/add-add: ConflictBench has no complete
  |                        base/left/right 3-way for the file; whole scenario dropped --
  |                        the SAME check the solver line applies at 106->93)
@@ -41,25 +41,26 @@ that previously leaked `+`-prefixed developers (recall 61.7 -> 64.6). Filtering 
 **Result (n=292, judge = claude-sonnet-4-6, threshold 0.5):**
 
 - accuracy 78.1%, **precision 100.0%**, recall 64.6%  (TP117 FP0 TN111 FN64).
-- The judge has zero false accepts on this set, so an `ACCEPTABLE` verdict is fully trustworthy;
-  the cost is recall (it under-credits acceptable alternatives), so every solver/tool rate it
-  produces is a conservative lower bound.
+- The judge has zero false accepts on this set. Note what the set is: ConflictBench's human labels
+  are on the five tools' resolutions, so this measures the judge on tool outputs. Its precision on
+  the LLM outputs is not measured directly (they have no human labels), and the structural check
+  below shows it can accept LLM code that does not parse. Its visible cost is recall (it
+  under-credits acceptable alternatives), so the rates it produces are best read as conservative
+  estimates.
 
 **Residual data-fidelity note.** Scheme A already removes the two big fidelity problems in the
 trunk (file-level ops via the B gate; `+`-prefixed pure-add developers via the is_diff fix). What
 remains in the n=292 is a minority of xlsx pairs whose candidate and developer are recorded at
-inconsistent scopes/windows (e.g. a 2-line developer vs a 24-line tool block). Such a mismatch can
-only make the judge *reject* a valid resolution — it depresses recall, never produces a false
-accept — so precision stays 100%. See `docs/DATA.md` for the enumeration. The judge's high precision
-is therefore not an artifact of clean inputs; a scope-mismatched reference can only cost recall, and
-the conservative-lower-bound conclusion is stable.
+inconsistent scopes/windows (e.g. a 2-line developer vs a 24-line tool block). Such a mismatch tends to
+make the judge *reject* a valid resolution (depressing recall); on this set it produced no false
+accepts (FP=0). See `docs/DATA.md` for the enumeration.
 
 **Scope notes.**
 - Dataset B (the LLM solver outputs scored through this DeepEval suite, including the
   `StructuralValidity` metric) is in "DeepEval Solver Results (current)" below.
 - A deeper fix of the anchor extraction was deliberately declined; the extraction limitation is
-  recorded in Limitations rather than fixed, since it only depresses recall and does not move the
-  conclusion (see the residual data-fidelity note above).
+  recorded in Limitations rather than fixed, since its observed effect is on recall (FP=0) and it
+  does not move the conclusion (see the residual data-fidelity note above).
 
 ## Standalone-Valid Calibration
 
@@ -68,14 +69,16 @@ reasonable merge judged from base/left/right alone, without the developer answer
 It does not compare against the developer resolution, so its conclusions are
 independent of the developer-match results.
 
-On a 40-item human-labeled blind sample:
+Measured in the earlier milestone with the hand-built standalone judge (not part of the current
+DeepEval suite), on a 40-item human-labeled blind sample:
 
 - false conflicts (n=20): accuracy 85%, precision 88.2%, recall 93.8%
   (TP15 FP2 TN2 FN1);
 - true conflicts: not used as a correctness metric, because a true conflict has
   no context-free correct answer (the choice depends on developer intent).
 
-Only the false-conflict number is a substantive correctness figure.
+Only the false-conflict number says anything about correctness, and it is indicative only: the
+false-conflict sample has just 4 negatives (TN2 FP2).
 
 ## DeepEval Solver Results (current)
 
@@ -98,7 +101,7 @@ Fed to both providers: 132 records (openai 67, gemini 65 -- gemini's 2 empty res
 | false | 12/18 = 66.7% | 11/18 = 61.1% | 23/36 = 63.9% |
 
 > Footnote — Gemini's 2 empties are a solver failure mode, not a punt. On `jedis@b013a74c` and
-> `jjwt@3f079803` Gemini exhausted all 4 retry rounds (`status=empty`, `punt=False`, `n_rounds=4`,
+> `jjwt@3f079803` Gemini used all 4 rounds, the first attempt plus 3 retries (`status=empty`, `punt=False`, `n_rounds=4`,
 > `final_valid=False`): it kept emitting the field skeleton (STRATEGY/CONFIDENCE) but an empty
 > RESOLUTION body, so no gradeable output was produced. An empty resolution can't be judged (GEval
 > rejects empty actual_output), so these drop from Gemini's denominator (65, not 67) rather than
@@ -110,41 +113,56 @@ Fed to both providers: 132 records (openai 67, gemini 65 -- gemini's 2 empty res
 For the headline we quote the **conservative floor, ~55%** (OpenAI 27/49 = 55.1%, the lower of the
 two providers) rather than the pooled 58.3% — consistent with the coverage-fair LLM range 55–59% and
 with reporting a floor, not a provider average. It is conservative by design: the GEval judge is
-strict (100% precision, zero false accepts), so it under-credits acceptable alternatives -- a
-defensible lower bound. (It is also a lower bound in
+strict (zero false accepts on the labeled tool resolutions, recall 64.6%), so it tends to
+under-credit acceptable alternatives. (It is also conservative in
 a second sense: it counts only developer-matching resolutions, not "valid but different" ones, since
 the standalone judge was deliberately not included -- see Standalone-Valid Calibration.)
 
 **② structural validity (deterministic, no LLM):**
 
 - true conflicts: 92/96 = **95.8%** (4 fail); false: 35/36 = 97.2% (1 fail).
-- The 4.2% true-conflict failures are all retries-exhausted cases (`n_rounds=4`, never reached a
-  valid resolution within the budget): 3 javalang parse failures (frontend-maven-plugin, jadx,
-  web3j) + 2 duplicate-declaration (presto, both providers). **4 of the 5 ②-failures were accepted
-  by ①** -- the LLM judge waved through code that does not parse. This is the concrete evidence that
-  structural validity must be a deterministic metric, independent of the LLM judge.
+- The 4 true-conflict failures are all retries-exhausted cases (`n_rounds=4`, never reached a valid
+  resolution within the budget): 2 javalang parse failures (jadx, web3j; OpenAI) + 2
+  duplicate-declaration (presto, both providers). The 1 false-conflict failure is also a javalang
+  parse failure (frontend-maven-plugin, OpenAI). **4 of these 5 ②-failures were accepted by ①** (all
+  but Gemini's presto) -- the LLM judge waved through code that does not parse or would not compile.
+  This is the concrete evidence that structural validity must be a deterministic metric, independent
+  of the LLM judge.
 
-**① LLM vs SOTA tools, same judge, coverage-fair (`scripts/compare_tools_geval.py`).** Both the
-LLM and the 5 ConflictBench tools scored by the *same* ① GEval judge (apples-to-apples), on the
-67-scenario reconstructable-Java overlap (49 true), under the overall convention (a tool punt or
-absent resolution = miss, since the LLM almost always resolves):
+**① LLM vs the five traditional tools, same judge, coverage-fair (`scripts/compare_tools_geval.py`).** Both the
+LLM and the 5 ConflictBench tools scored by the *same* ① GEval judge, on the
+67-scenario reconstructable-Java overlap (49 true), under the overall convention: a case the method
+left unresolved, or whose resolution cannot be graded, counts as a miss. For a tool, "unresolved"
+means its output still contains conflict markers (code label `is_punt`); the tools have no way to
+report that a conflict is unresolvable, so this is an observed state, not a decision by the tool.
 
-| true conflicts (n=49) | among-resolved | overall | punt |
-|---|---|---|---|
-| LLM Gemini   | 29/47 = 61.7% | 29/49 = **59.2%** | 0 |
-| LLM OpenAI   | 27/49 = 55.1% | 27/49 = **55.1%** | 0 |
-| AutoMerge    | 18/38 = 47.4% | 18/49 = 36.7% | 10 |
-| JDime        | 17/31 = 54.8% | 17/49 = 34.7% | 16 |
-| IntelliMerge | 13/27 = 48.1% | 13/49 = 26.5% | 22 |
-| FSTMerge     |  6/21 = 28.6% |  6/49 = 12.2% | 18 |
-| KDiff3       |  2/4  = 50.0% |  2/49 =  4.1% | 45 |
+| true conflicts (n=49) | among-resolved | overall | unresolved | not gradeable |
+|---|---|---|---|---|
+| LLM Gemini   | 29/47 = 61.7% | 29/49 = **59.2%** | 0 | 2 |
+| LLM OpenAI   | 27/49 = 55.1% | 27/49 = **55.1%** | 0 | 0 |
+| AutoMerge    | 19/38 = 50.0% | 19/49 = 38.8% | 10 | 1 |
+| JDime        | 18/31 = 58.1% | 18/49 = 36.7% | 16 | 2 |
+| IntelliMerge | 13/27 = 48.1% | 13/49 = 26.5% | 22 | 0 |
+| FSTMerge     |  7/21 = 33.3% |  7/49 = 14.3% | 18 | 10 |
+| KDiff3       |  3/4  = 75.0% |  3/49 =  6.1% | 45 | 0 |
 
-Among-resolved, the LLM and the strongest tool are close (Gemini 61.7% vs JDime 54.8%); the gap
-opens entirely on **coverage**: tools abstain heavily (KDiff3 punts 45 of 49, IntelliMerge 22,
-JDime 16, AutoMerge 10) while the LLM under Scheme A never punts. Under the coverage-fair overall
-convention the LLM (55-59%) clears the strongest tool (AutoMerge 36.7%) by ~18-22 points. This is
-the applicability claim: the LLM's edge is not "slightly more accurate" but "still produces a
-gradeable resolution where structured tools give up."
+"Not gradeable": for a tool, no recorded label or a resolution dropped from the judged set (e.g. an
+empty region); for Gemini, the two empty resolutions described above. Source:
+`results/solver_eval_20260627_095221.jsonl` (LLM verdicts) and
+`results/meta_evaluation_20260727_062930.jsonl` (tool verdicts, the same n=292 judge run as the
+calibration above). One difference remains between the two sides: the conflict segment shown to the judge comes from
+the reconstructed file for the LLMs, and from the scenario files or, as a fallback, ConflictBench's
+recorded snippets for the tools. The judge and the input shape are the same; the provenance of that
+segment is not (see `docs/DATA.md`).
+
+Among-resolved (only the cases each method actually resolved), tools and LLMs are mixed: JDime's
+58.1% sits between the two LLMs (OpenAI 55.1%, Gemini 61.7%), and KDiff3's 75.0% rests on only 4
+resolved cases. The gap opens on **coverage**: the tools leave 20–92% of these conflicts unresolved
+(AutoMerge 10, JDime 16, FSTMerge 18, IntelliMerge 22, KDiff3 45 of 49), while the LLM under
+Scheme A attempts every case. Under the coverage-fair overall convention the LLMs (55–59%) clear the
+strongest tool (AutoMerge, 38.8%) by ~16–20 points. The claim is therefore about coverage, not raw
+accuracy: the LLM still produces a gradeable resolution where the structured tools leave the
+conflict in place.
 
 ## Number provenance: how every reported figure is derived
 
@@ -184,16 +202,16 @@ forces a resolution on all       lets the model punt true conflicts
 lose 5 with an empty developer region (1 true `vavr` + 4 false) -> **67 Dataset B scenarios
 (49 true / 18 false)**, the set scored by the GEval suite in "DeepEval Solver Results (current)".
 
-### The denominator is fixed by the LLMs, not the tools
+### The denominator is fixed in advance, not per method
 
-A scenario enters the comparable set iff BOTH LLMs produced a gradeable resolution
-(`status=resolved`, `dev_status=ok`). The 5 tools are then scored on that fixed
-set; a tool that punts (leaves conflict markers) or has no recorded output counts
-as a MISS. This is the fair convention when one side may abstain: fix the
-denominator by the side that always answers, and count the other side's
-abstention as a failure rather than shrinking the denominator.
+The comparison runs on the 67 Dataset B scenarios (49 true): reconstructable Java scenarios whose
+developer region can be extracted and is non-empty. Both LLMs and the 5 tools are scored on that
+fixed set. An output that cannot be graded (for the LLMs, Gemini's 2 empty resolutions) or a tool
+output that still contains conflict markers (unresolved) counts as a MISS. This is the fair
+convention when a method may leave cases unresolved: fix the denominator in advance and count each
+method's unresolved or ungradeable cases as failures, rather than shrinking the denominator.
 
-One asymmetry to keep in mind: a tool punt stays in the denominator as a miss, but
+One asymmetry to keep in mind: an unresolved tool output stays in the denominator as a miss, but
 an LLM punt in Scheme B removes that scenario from the denominator. So Scheme B's
 LLM rates sit on a self-selected "resolvable" subset, which is why Scheme A
 (no gating, forces a resolution on all 50 true conflicts) is the PRIMARY scheme
@@ -203,7 +221,7 @@ and Scheme B is a robustness check.
 
 True conflicts are the hard case (overlapping edits requiring judgement); false
 conflicts (compatible edits) should auto-merge, so beating tools there is less
-telling. Both are reported; the resume headline quotes the true-conflict row.
+telling. Both are reported; the summary figures quote the true-conflict row.
 
 ### Scheme B (detection / robustness variant)
 
@@ -212,49 +230,54 @@ distinct from Scheme A's forced resolution. Scheme A is the scored line; Scheme 
 variant, not re-scored through the DeepEval suite. The methodology (fixed-denominator, coverage-fair,
 both conflict types measured) is unchanged and described above.
 
-### Resume headline mapping
+### Summary of reported numbers
 
-**Current (DeepEval, use these).** True-conflict developer-match **≈55%** (conservative floor; OpenAI
-55.1%, Gemini 61.7%, pooled 58.3% — we quote the floor), validated GEval judge, Dataset B; vs SOTA
-tools under the same judge + coverage-fair convention, LLM **55-59%** vs strongest tool AutoMerge
-**36.7%** (n=49 true, 67-scenario overlap). Quality claim uses the ~55% floor; applicability claim
-uses the tool comparison + coverage evidence (tools punt 25-90%, LLM punt=0).
+**Current (DeepEval).** True-conflict developer-match **≈55%** (conservative floor; OpenAI
+55.1%, Gemini 61.7%, pooled 58.3% — we quote the floor), validated GEval judge, Dataset B; vs the five
+traditional tools under the same judge + coverage-fair convention, LLM **55–59%** vs strongest tool AutoMerge
+**38.8%** (n=49 true, 67-scenario overlap). The quality figure is the ~55% floor; the coverage
+figure is the tool comparison plus the unresolved rates (the tools leave 20–92% of true conflicts
+unresolved; the LLM under Scheme A attempts all of them).
 
 ## Key Findings
 
-- On true conflicts, under the validated GEval judge + coverage-fair convention, the LLMs (55-59%)
-  beat every traditional tool (strongest AutoMerge 36.7%), mainly because tools abstain or leave
-  conflicts unresolved (KDiff3 punts 45 of 49) while the LLM under Scheme A always attempts a
-  resolution. Among-resolved the gap is small (Gemini 61.7% vs JDime 54.8%); the LLM's real edge is
-  coverage, not raw accuracy.
+- On true conflicts, under the validated GEval judge + coverage-fair convention, the LLMs (55–59%)
+  score above every traditional tool (strongest: AutoMerge 38.8%), mainly because the tools leave
+  20–92% of these conflicts unresolved (KDiff3 45 of 49) while the LLM under Scheme A attempts every
+  case. Among-resolved the picture is mixed (JDime's 58.1% sits between OpenAI's 55.1% and Gemini's
+  61.7%); the LLM's edge is coverage, not raw accuracy.
 - Structural validity (②) is 95.8% on true conflicts; the 4.2% that fail are retries-exhausted
-  cases. Crucially, **① (the LLM judge) accepted 4 of the 5 structurally-invalid resolutions** --
+  cases. Crucially, **① (the LLM judge) accepted 4 of the 5 structurally-invalid resolutions (4 true + 1
+  false conflict)** --
   the LLM judge is unreliable for structural correctness, which is why ② must be a deterministic,
   independent metric.
-- Schemes A and B agreed closely in the earlier milestone (archived), so forcing the model to
+- *Earlier milestone (hand-built judge; not re-scored by the current suite):* Schemes A and B
+  agreed closely, so forcing the model to
   declare conflict-ness first (B) does not change the aggregate result; B's punts are rare but
   precise (all on true conflicts). B is a detection/robustness variant and is not re-scored through
   DeepEval (Scheme A is the scored line).
-- Self-reported confidence is not a reliable desirability predictor.
-- Gemini was generally steadier than OpenAI on final validity in the recorded runs.
+- *Earlier milestone (hand-built judge):* self-reported confidence was not a reliable predictor
+  of developer-match.
 
 ## Limitations
 
 - The developer-match judge is conservative and under-credits acceptable alternatives (GEval recall
-  64.6%), so every reported rate is a lower bound.
+  64.6% on the labeled tool resolutions), so the reported rates are best read as conservative
+  estimates; the judge's precision on LLM outputs is not directly measured.
 - LLM outputs do not have independent human labels, so some judge-style bias cannot be fully ruled
   out (the judge is a different vendor from both solvers, which mitigates self-preference).
 - The standalone-valid (no-reference) judge was deliberately *not* included in the DeepEval suite: it
   has no ground truth to validate against, so it would add an unverifiable judge. Consequently the
   headline counts only developer-matching resolutions, not "valid but different" ones -- a further
-  reason it is a conservative lower bound.
+  reason the figure is conservative.
 - The LLM-vs-tools comparison is on the 67-scenario reconstructable-Java overlap (49 true), a subset
   of the full benchmark; tool resolutions come from ConflictBench's recorded xlsx snippets, not
   locally re-run tools.
 - Anchor-based developer extraction excludes 20 scenarios whose region cannot be
   uniquely located; these split into four causes (boundary_edge, duplicate_context,
   adjacent_block_marker, rewrite_vanished) detailed in DATA.md. The guard excludes
-  rather than guesses, so the denominator is a conservative subset, not a biased one.
+  rather than guesses, so no excluded case contributes a possibly wrong verdict. The excluded
+  cases are not a random sample, so the rates describe the gradeable subset.
 - `javalang` checks syntax, not full Java compilation. For multi-block files where the spliced file
   still carries other blocks' markers, ② degrades to a marker-only check (no whole-file parse).
 - Standalone-valid is meaningful only for false conflicts.

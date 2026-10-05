@@ -1,17 +1,20 @@
 # Recomputing the metrics from the on-disk JSONL
 
-None of the headline numbers are "run-once-and-gone" — they are simple aggregations of **two per-case
-JSONL files** on disk. To reproduce them, just count over those two files; **no LLM calls needed**.
+The judge and solver numbers are not "run-once-and-gone" — they are simple aggregations of **two per-case
+JSONL files**, committed under `results/`. To reproduce them, just count over those two files; **no LLM
+calls needed**. The fastest path is `python scripts/verify_numbers.py`, which recomputes the judge and solver
+figures in §1–2 and checks them against the reported values. The tool comparison at the end of §2
+also needs the ConflictBench labels.
 
 | Metric | File on disk | Rows | What each row is |
 | --- | --- | --- | --- |
-| ① judge line (validate the judge) 100% / 64.6% | `outputs/deepeval/meta_evaluation_20260727_062930.jsonl` | 292 | one judge verdict vs its human label |
-| ①+② solver line (measure the LLM) ≈55% / 95.8% | `outputs/deepeval/solver_eval_20260627_095221.jsonl` | 132 | one (scenario × provider) with ① accept + ② structurally_valid |
+| ① judge line (validate the judge) 100% / 64.6% | `results/meta_evaluation_20260727_062930.jsonl` | 292 | one judge verdict vs its human label |
+| ①+② solver line (measure the LLM) ≈55% / 95.8% | `results/solver_eval_20260627_095221.jsonl` | 132 | one (scenario × provider) with ① accept + ② structurally_valid |
 
-> Filenames are timestamped; a rerun writes a new one, so take the latest `meta_evaluation_*` /
-> `solver_eval_*` in `outputs/deepeval/`. The older `metaval_2026062*` (303/310 rows) are the
-> superseded early cut, and `judge_calibration/calib_*` (563 rows) is the hand-built-judge era — both
-> historical.
+> `results/` holds frozen copies of the two runs behind the judge and solver numbers. A rerun writes new,
+> timestamped files under `outputs/deepeval/` (gitignored); the frozen copies do not change. Earlier
+> cuts (`metaval_2026062*`, 303/310 rows, and the hand-built-judge `judge_calibration/calib_*`) are
+> historical and not included.
 
 ---
 
@@ -22,7 +25,7 @@ Each row of `meta_evaluation_*.jsonl`: `{project, commit, tool, source, human(bo
 
 ```python
 import json
-rows = [json.loads(l) for l in open("outputs/deepeval/meta_evaluation_20260727_062930.jsonl") if l.strip()]
+rows = [json.loads(l) for l in open("results/meta_evaluation_20260727_062930.jsonl") if l.strip()]
 TP = sum(r["judge"] and r["human"] for r in rows)          # 117
 FP = sum(r["judge"] and not r["human"] for r in rows)      # 0
 TN = sum(not r["judge"] and not r["human"] for r in rows)  # 111
@@ -32,7 +35,7 @@ recall    = TP/(TP+FN)          # 64.6%
 accuracy  = (TP+TN)/len(rows)   # 78.1%
 ```
 
-FP=0 → precision 100% (when the judge says "acceptable" it is never wrong); recall 64.6% → conservative,
+FP=0 → precision 100% (on these 292 tool resolutions, every "acceptable" verdict agreed with the human label); recall 64.6% → conservative,
 it misses some resolutions that are in fact acceptable.
 
 ## 2. Solver line: true-conflict dev-match ≈55% floor, structural validity 95.8%
@@ -40,7 +43,7 @@ it misses some resolutions that are in fact acceptable.
 Each row of `solver_eval_*.jsonl`: `{id, provider, valid_conflict(bool), accept(bool, ①), accept_score, structurally_valid(bool, ②), accept_reason, valid_reason}`.
 
 ```python
-s = [json.loads(l) for l in open("outputs/deepeval/solver_eval_20260627_095221.jsonl") if l.strip()]
+s = [json.loads(l) for l in open("results/solver_eval_20260627_095221.jsonl") if l.strip()]
 true = [r for r in s if r["valid_conflict"]]               # 96 rows = 49 true scenarios × 2 providers (gemini −2)
 # ① dev-match, stratified by provider:
 for p in ("openai", "gemini"):
@@ -51,8 +54,16 @@ for p in ("openai", "gemini"):
 print(sum(r["structurally_valid"] for r in true), "/", len(true))   # 92/96 = 95.8%
 ```
 
-Comparison against the 5 tools (AutoMerge 36.7%, etc.) comes from `scripts/compare_tools_geval.py`,
-which judges each tool's resolution (from the xlsx) with **the same ① judge**, same convention.
+Comparison against the 5 tools (AutoMerge 38.8%, etc.) comes from `scripts/compare_tools_geval.py`.
+It makes no LLM calls: the tools' ① verdicts are a by-product of the judge run in §1 (the
+meta-evaluation judged the gradeable tool resolutions with **the same ① judge**). It also needs the
+ConflictBench labels that mark which tool outputs were left unresolved, which
+`python scripts/fetch_data.py` downloads (no API key):
+
+```bash
+python scripts/compare_tools_geval.py --llm results/solver_eval_20260627_095221.jsonl \
+    --tool results/meta_evaluation_20260727_062930.jsonl
+```
 
 ---
 
@@ -65,19 +76,20 @@ aggregate already-judged results:
 ① judge line:
   data/ConflictBench.xlsx
     → conflictagent/data.load_manual_labels()             627 labeled pairs
-    → evaluation/dataset.build_metaevaluation_testcases()  drop punt/file-level/empty → 292
+    → evaluation/dataset.build_metaevaluation_testcases()  drop unresolved/file-level/empty → 292
     → evaluation/run_suite.py  (runs ① GEval, writes meta_evaluation_*.jsonl + prints the matrix)
 
 ②+① solver line:
   data/scenarios/  → conflictagent/data.load_scenarios(java_only)  93 reconstructable
-    → scripts/run_agent.py  (solver.py generate + agent.py generate-validate-retry loop,
+    → scripts/run_eval.py --scheme A --no-judge  (solver.py generate + agent.py
+                             generate-validate-retry loop; writes outputs/eval/runs/eval_A_*.jsonl)
+    → evaluation/build_complete_set.py  (merge the runs: one record per scenario × provider,
                              writes outputs/eval/eval_A_complete.jsonl)
-    → evaluation/build_complete_set.py  (assemble/dedup the complete set)
     → evaluation/dataset.build_solver_testcases()  (rebuild inputs, locate dev region → 67 scenarios → 132 records)
     → evaluation/run_solver_eval.py  (runs ①+②, writes solver_eval_*.jsonl)
 ```
 
-- `outputs/eval/eval_A_complete.jsonl` (first line is a `kind=_meta` header; the rest are each
+- `outputs/eval/eval_A_complete.jsonl` (local, regenerated by the chain above; first line is a `kind=_meta` header; the rest are each
   scenario's resolution per provider) = the solver line's **pre-judging** raw material.
 - The 900→292 per-point provenance for the judge line is in
   `scripts/diagnostics/judge_funnel_provenance.py` and `docs/judge_funnel_900.xlsx`.

@@ -18,8 +18,8 @@ Two changes since the 2026-06-08 redirect:
    - **A**: no conflict-type gating, always produces a resolution + self-reported strategy + confidence.
      Detection becomes confidence calibration.
    - **B**: classic two-stage — first decides `TRUE_CONFLICT` (punt, no resolution) or `RESOLVABLE`
-     (then resolves). punt vs the human `Valid Conflict` label = the Detection metric, comparable to
-     the 5 tools under the same convention.
+     (then resolves). punt vs the human `Valid Conflict` label = the Detection metric (Scheme B only; reported
+     separately from the scored Scheme A results).
 
 ---
 
