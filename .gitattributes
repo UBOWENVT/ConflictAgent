@@ -1,0 +1,2 @@
+# Frozen result files are checked by sha256 in scripts/verify_numbers.py; keep their bytes exact.
+results/*.jsonl -text
