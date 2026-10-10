@@ -120,6 +120,9 @@ def main() -> None:
     ap.add_argument("--group", action="append", required=True, metavar="NAME=PATH")
     ap.add_argument("--reference", default="june",
                     help="group whose cases define input/expected_output (judged in full)")
+    ap.add_argument("--judge-groups", default=None,
+                    help="comma-separated groups to send to the judge (default: all); the others "
+                         "are still built, hard-checked and given (2)")
     ap.add_argument("--threshold", type=float, default=0.5)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true", help="build and check only; no judge calls")
@@ -136,6 +139,9 @@ def main() -> None:
         groups[name] = Path(path)
     if args.reference not in groups:
         raise SystemExit(f"reference group {args.reference!r} not given")
+    judge_groups = set(groups) if args.judge_groups is None else set(args.judge_groups.split(","))
+    if not judge_groups <= set(groups):
+        raise SystemExit(f"--judge-groups not among the groups: {sorted(judge_groups - set(groups))}")
 
     loaded = {name: load_group(name, path) for name, path in groups.items()}
     ref_cases = loaded[args.reference][1]
@@ -155,7 +161,8 @@ def main() -> None:
             key = (rec.get("id"), rec.get("provider"))
             case = cases.get(key)
             outcome = classify(rec)
-            judge = case is not None and (name == args.reference or outcome in JUDGED_OUTCOMES)
+            judge = (case is not None and name in judge_groups
+                     and (name == args.reference or outcome in JUDGED_OUTCOMES))
             valid, valid_reason = structural(case)
             if rec.get("setting") == "agent" and valid is not None and \
                     rec.get("final_valid") is not None and valid != rec["final_valid"]:
@@ -200,7 +207,8 @@ def main() -> None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         header = {"kind": "_meta", "judge": config.JUDGE_MODEL[1], "threshold": args.threshold,
                   "deepeval": importlib_metadata.version("deepeval"), "seed": args.seed,
-                  "reference": args.reference, "started": stamp,
+                  "reference": args.reference, "judge_groups": sorted(judge_groups),
+                  "started": stamp,
                   "groups": {n: {"path": str(p), "sha256": sha256(p),
                                  "records": len(loaded[n][0])} for n, p in groups.items()}}
         out_path.write_text(json.dumps(header, ensure_ascii=False) + "\n", encoding="utf-8")

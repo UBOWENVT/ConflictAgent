@@ -114,8 +114,22 @@ the conflict file left in the sandbox, not the submitted text.**
 One difference: `_validate` rejects an empty resolution, while `check_java` sees only the edited
 file. Scoring treats an empty resolution as described below.
 
-**Limits:** 40 messages, 10 minutes, and a per-sample token limit set from the trial run.
-Temperature 0. `fail_on_error=0.05`; interrupted runs continue with `inspect eval-retry`.
+**Limits:** 60 messages, 10 minutes, 600,000 tokens per sample. Temperature 0. Reasoning effort is
+left at each provider's default. `fail_on_error=0.05`; interrupted runs continue with
+`inspect eval-retry`.
+
+These were set after a first trial (10 scenarios × 2 models) that used 40 messages. That limit cut
+off 3 of the 10 Gemini samples, which spent many steps looking for repository files and git that
+the sandbox does not have. Two sentences were then added to the prompt: one stating that the four
+files are all there is, and one giving the step budget. Both changes are generic (environment
+facts and limits), not tied to any scenario. Trial runs are for debugging only and do not feed
+any reported number.
+
+**Models.** `openai/gpt-5.4-2026-03-05` and `google/gemini-3.5-flash`, the same ids as the
+single-shot runs. Google now routes `gemini-3.5-flash` requests to `gemini-3.6-flash`: the
+responses report `model_version: gemini-3.6-flash` (checked 2026-10-09), and Google's deprecation
+page says the same. A same-day single-shot rerun sends the same id, so both settings get the same
+served model. The June single-shot outputs came from the model before this routing.
 
 ## Scoring rules
 

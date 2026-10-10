@@ -37,9 +37,9 @@ def _ids(ids: str | list[str] | None) -> list[str] | None:
 def conflict_resolution(
     ids: str | list[str] | None = None,
     sandbox: str = "docker",
-    message_limit: int = 40,
+    message_limit: int = 60,          # first trial: 40 cut off 3/10 Gemini samples
     time_limit: int = 600,
-    token_limit: int | None = None,
+    token_limit: int | None = 600_000,
     tool_timeout: int = 60,
 ) -> Task:
     if sandbox not in ("docker", "local"):

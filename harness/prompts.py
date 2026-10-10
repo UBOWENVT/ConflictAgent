@@ -11,6 +11,8 @@ three versions being merged (read-only):
   sides/base/<path>   the common ancestor
   sides/left/<path>   the left side
   sides/right/<path>  the right side
+These four files are all there is: the rest of the repository is not available, and there is no \
+git. Everything you can use is in these files.
 
 Conflict regions in the file are in diff3 form:
   <<<<<<< left
@@ -40,4 +42,7 @@ as Java.
 Work out what each side changed relative to the base, edit the tagged region, run check_java and \
 fix any problem it reports, then call submit() with one sentence describing your resolution. \
 What is evaluated is the file as you leave it, not the submitted sentence.
+
+You have a limited number of steps (about 25 tool calls), so work efficiently: once check_java \
+passes and you are satisfied with the resolution, submit.
 """
