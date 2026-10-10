@@ -113,6 +113,23 @@ def structural(rows: list[dict], groups: list[str]) -> list[str]:
     return out
 
 
+def structural_split(rows: list[dict], groups: list[str], n_blocks: dict[str, int]) -> list[str]:
+    """(2) on true conflicts, split by what the check could verify: single-block files get the full
+    check (markers, parse, duplicates); multi-block files keep other blocks' markers, so only the
+    marker check applies."""
+    out = ["| group | provider | single-block (full check) | multi-block (markers only) |",
+           "|---|---|---|---|"]
+    for g in groups:
+        for prov in sorted({r["provider"] for r in rows if r["group"] == g}):
+            rs = [r for r in rows if r["group"] == g and r["provider"] == prov
+                  and r["valid_conflict"] is True and r["structurally_valid"] is not None]
+            single = [r for r in rs if n_blocks[r["id"]] == 1]
+            multi = [r for r in rs if n_blocks[r["id"]] > 1]
+            out.append(f"| {g} | {prov} | {rate(sum(r['structurally_valid'] for r in single), len(single))}"
+                       f" | {rate(sum(r['structurally_valid'] for r in multi), len(multi))} |")
+    return out
+
+
 def paired(rows: list[dict], a: str, b: str, drop_presto: bool = False) -> list[str]:
     """Per-scenario pairing of two groups on true conflicts, primary convention."""
     out = [f"| provider | both | only {a} | only {b} | neither | McNemar exact p |",
@@ -180,6 +197,10 @@ def main() -> None:
               "(without presto)")
     print("\n## (2) structural validity\n")
     print("\n".join(structural(rows, groups)))
+    from harness.dataset import build_samples
+    n_blocks = {s.id: s.metadata["n_blocks"] for s in build_samples()}
+    print("\nby what the check can verify (true conflicts):\n")
+    print("\n".join(structural_split(rows, groups, n_blocks)))
     if args.agent in groups and args.single_shot in groups:
         print(f"\n## paired: {args.agent} vs {args.single_shot} (true conflicts, primary)\n")
         print("\n".join(paired(rows, args.agent, args.single_shot)))
