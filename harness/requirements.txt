@@ -1,0 +1,14 @@
+# Harness environment (.venv-harness), kept separate from the DeepEval scoring venv (.venv):
+# inspect-ai wants newer pydantic / anyio / click than the deepeval stack tolerates.
+#
+#   python -m venv .venv-harness && .venv-harness/bin/pip install -r harness/requirements.txt
+inspect-ai==0.3.277
+openai==3.28.0            # Inspect provider for openai/ models
+google-genai==2.29.0      # Inspect provider for google/ models
+javalang==0.13.0          # same version as .venv and the sandbox image
+pandas==3.0.3             # conflictagent.data (xlsx) and inspect_ai.analysis
+openpyxl==3.1.5
+pyarrow==26.0.0
+python-dotenv==1.2.2      # conflictagent.config
+tenacity==9.1.4           # conflictagent.llm (imported via conflictagent.agent)
+pytest==9.1.1
