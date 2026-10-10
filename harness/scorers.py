@@ -41,6 +41,7 @@ OUTCOME_RULES: dict[str, tuple[str, str]] = {
     "markers": ("miss", "miss"),           # submitted with conflict markers in the resolution
     "out_of_block": ("miss", "judge"),     # secondary judges the in-block region only
     "not_extractable": ("miss", "exclude"),
+    "error": ("miss", "exclude"),          # the sample itself errored (set at export time)
 }
 
 

@@ -59,12 +59,17 @@ RESOLUTION_ACCEPTABILITY_CRITERIA = (
 )
 
 
-def resolution_acceptability_metric(threshold: float = 0.5, model: object | None = None) -> GEval:
+def resolution_acceptability_metric(threshold: float = 0.5, model: object | None = None,
+                                    evaluation_steps: list[str] | None = None) -> GEval:
     """The ① semantic judge as a DeepEval GEval metric.
 
     test_case fields used: input = the conflict (diff3 + window); actual_output = candidate
     resolution; expected_output = developer resolution. Score is GEval's 0-1; threshold maps to
     a binary accept/reject so results align with the binary human labels.
+
+    By default GEval generates its evaluation steps from the criteria on the first measure() and
+    reuses them for the rest of the instance's life. Pass `evaluation_steps` (as recorded from an
+    earlier instance) to resume with exactly those steps: the scoring prompt uses only the steps.
     """
     return GEval(
         name="Resolution Acceptability",
@@ -76,6 +81,7 @@ def resolution_acceptability_metric(threshold: float = 0.5, model: object | None
         ],
         model=model or make_judge_model(),
         threshold=threshold,
+        evaluation_steps=evaluation_steps,
     )
 
 

@@ -82,7 +82,7 @@ def test_outcome_rules_table():
     assert {o for o, (p, _) in OUTCOME_RULES.items() if p == "judge"} == {"gradeable"}
     assert OUTCOME_RULES["markers"] == ("miss", "miss")
     assert OUTCOME_RULES["out_of_block"] == ("miss", "judge")
-    for o in ("empty", "no_edit", "unfinished", "not_extractable"):
+    for o in ("empty", "no_edit", "unfinished", "not_extractable", "error"):
         assert OUTCOME_RULES[o] == ("miss", "exclude")
 
 
