@@ -1,6 +1,6 @@
 """Per-sample process metrics from Inspect logs, plus a token-cost estimate and extrapolation.
 
-    python -m harness.analyze logs/2026-*.eval [--csv outputs/stage3/trial_metrics.csv]
+    python -m harness.analyze logs/2026-*.eval [--csv metrics.csv] [--dump transcripts/]
 
 Costs are tokens x list price (PRICES, USD per 1M tokens), computed after the fact: Inspect has
 no price data for these models, so cost_limit is not used during runs (token_limit is).
@@ -84,12 +84,49 @@ def sample_metrics(model: str, sample: EvalSample) -> dict:
     }
 
 
-def collect(log_paths: list[str]) -> list[dict]:
+def _clip(text: str, n: int) -> str:
+    text = text.strip()
+    return text if len(text) <= n else text[:n] + f" ... [{len(text) - n} more chars]"
+
+
+def trajectory_text(model: str, sample: EvalSample, clip: int = 1500) -> str:
+    """A readable transcript of one sample: the model's text, each tool call and its output."""
+    served = sorted({e.output.model for e in sample.events
+                     if e.event == "model" and getattr(e, "output", None)})
+    score = (sample.scores or {}).get(SCORER)
+    lines = [f"# {sample.id} | requested {model} | served {', '.join(served)}",
+             f"# outcome {score.metadata['outcome'] if score else 'error'}"
+             f" | limit {sample.limit.type if sample.limit else '-'}"
+             f" | error {sample.error.message[:200] if sample.error else '-'}", ""]
+    step = 0
+    for m in sample.messages:
+        if m.role == "assistant":
+            step += 1
+            if m.text and m.text.strip():
+                lines.append(f"[{step}] assistant: {_clip(m.text, clip)}")
+            for tc in m.tool_calls or []:
+                args = ", ".join(f"{k}={_clip(repr(v), clip)}" for k, v in tc.arguments.items())
+                lines.append(f"[{step}] -> {tc.function}({args})")
+        elif m.role == "tool":
+            body = f"ERROR {m.error.type}: {m.error.message}" if m.error else m.text
+            lines.append(f"      <- {m.function}: {_clip(body, clip)}")
+    if score is not None:
+        lines += ["", f"# extracted resolution ({score.metadata['extraction']}):",
+                  score.answer or "(none)"]
+    return "\n".join(lines) + "\n"
+
+
+def collect(log_paths: list[str], dump_dir: str | None = None) -> list[dict]:
     rows = []
     for p in log_paths:
         lg = read_eval_log(p)
         for s in lg.samples or []:
             rows.append(sample_metrics(lg.eval.model, s))
+            if dump_dir:
+                d = Path(dump_dir) / lg.eval.model.replace("/", "_")
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{s.id}.txt").write_text(trajectory_text(lg.eval.model, s),
+                                               encoding="utf-8")
     return rows
 
 
@@ -128,8 +165,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("logs", nargs="+")
     ap.add_argument("--csv", default=None)
+    ap.add_argument("--dump", default=None, help="write one readable transcript per sample here")
     args = ap.parse_args()
-    rows = collect(args.logs)
+    rows = collect(args.logs, args.dump)
     print(summarize(rows))
     if args.csv:
         Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
