@@ -212,6 +212,8 @@ def main() -> None:
         if args.single_shot in groups:
             print(f"\nmodel drift ({args.single_shot} vs june, primary, true conflicts):\n")
             print("\n".join(paired(rows, args.single_shot, "june")))
+            print("\nwithout presto:\n")
+            print("\n".join(paired(rows, args.single_shot, "june", drop_presto=True)))
     if args.agent in groups:
         print("\n" + "\n".join(gate(rows, args.agent)))
     if args.csv:

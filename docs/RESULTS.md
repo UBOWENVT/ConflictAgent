@@ -108,7 +108,8 @@ Fed to both providers: 132 records (openai 67, gemini 65 -- gemini's 2 empty res
 > count as wrong answers. Both are true conflicts; if instead counted as failures Gemini's true rate
 > is 29/49 = 59.2% (the "overall" convention in the tool comparison below) vs 29/47 = 61.7%
 > ("among-resolved"). Either way the headline floor is OpenAI's 55.1% (OpenAI resolved both), so
-> these two empties do not move the reported ~55%.
+> these two empties do not move the reported ~55%. (2026-10: these are probably deliberate
+> deletions, not missing output; see Corrections below.)
 
 For the headline we quote the **conservative floor, ~55%** (OpenAI 27/49 = 55.1%, the lower of the
 two providers) rather than the pooled 58.3% — consistent with the coverage-fair LLM range 55–59% and
@@ -127,7 +128,33 @@ the standalone judge was deliberately not included -- see Standalone-Valid Calib
   parse failure (frontend-maven-plugin, OpenAI). **4 of these 5 ②-failures were accepted by ①** (all
   but Gemini's presto) -- the LLM judge waved through code that does not parse or would not compile.
   This is the concrete evidence that structural validity must be a deterministic metric, independent
-  of the LLM judge.
+  of the LLM judge. (2026-10: 3 of these failures are genuine, and ① accepted all 3; see
+  Corrections below.)
+
+**Corrections (2026-10).** Found while building the agent harness ([HARNESS.md](HARNESS.md)). The
+figures reported above are unchanged; these notes break them down and correct how they are
+interpreted:
+
+- **② mixes two checks.** 32 of the 96 true-conflict records are in multi-block files. There the
+  other blocks keep their markers, so ② can only check that the resolution itself has none. On
+  single-block files, where the full check runs (markers, parse, duplicate declarations), ② is
+  60/64 = 93.8% (60/62 = 96.8% without presto); on multi-block files it is 32/32. All 5 ② failures
+  are in single-block files. False conflicts: single-block 23/24, multi-block 12/12.
+- **3 genuine structural failures, all accepted by ①.** jadx, web3j (true) and
+  frontend-maven-plugin (false) do not parse, and ① accepted all 3. The 2 presto failures come from
+  a checker false positive (next point), not from broken code. The conclusion stands: ② must stay
+  a deterministic metric, independent of the judge. Its evidence is 3 of 3, not "4 of 5".
+- **presto@f50b46c7.** The reconstructed target block spans two real conflicts; ConflictBench
+  annotates only the first. So the developer region taken from `child` contains the second
+  conflict, still unresolved. Separately, the duplicate-declaration check flags two overloads
+  outside the block, `insertNullEvery(int, Iterable<?>[])` and `insertNullEvery(int, Iterable<T>)`,
+  because it ignores array dimensions. Without presto, OpenAI's true-conflict rate is 26/48 =
+  54.2%. The fix and a recount are left for later.
+- **Gemini's 2 empty resolutions** (jedis, jjwt) are probably deliberate deletions rather than
+  missing output. In both target blocks one side is empty, and the empty resolution is that side.
+  The model's own STRATEGY field names that side: `R` for jedis (right is empty), `L` for jjwt
+  (left is empty). The validator rejects an empty resolution as "no text", so the model was asked
+  again until the retries ran out. Under the overall convention they remain misses.
 
 **① LLM vs the five traditional tools, same judge, coverage-fair (`scripts/compare_tools_geval.py`).** Both the
 LLM and the 5 ConflictBench tools scored by the *same* ① GEval judge, on the
@@ -250,7 +277,12 @@ unresolved; the LLM under Scheme A attempts all of them).
   cases. Crucially, **① (the LLM judge) accepted 4 of the 5 structurally-invalid resolutions (4 true + 1
   false conflict)** --
   the LLM judge is unreliable for structural correctness, which is why ② must be a deterministic,
-  independent metric.
+  independent metric. (2026-10: on single-block files, where the whole file is parsed, ② is 93.8%;
+  the genuine failures are 3, all accepted by ①. See Corrections.)
+- Agent setting (2026-10, [HARNESS.md](HARNESS.md)): on the same 49 true conflicts, under the same
+  judge, a tool-using agent in a Docker sandbox and a same-day rerun of this pipeline are comparable
+  (lower provider 53.1% vs 46.9%; per-scenario McNemar p = 0.58 for GPT, 0.38 for Gemini). The
+  agent made about 4 (GPT) and 10 (Gemini) times as many model calls.
 - *Earlier milestone (hand-built judge; not re-scored by the current suite):* Schemes A and B
   agreed closely, so forcing the model to
   declare conflict-ness first (B) does not change the aggregate result; B's punts are rare but

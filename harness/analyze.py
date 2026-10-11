@@ -1,6 +1,7 @@
 """Per-sample process metrics from Inspect logs, plus a token-cost estimate and extrapolation.
 
     python -m harness.analyze logs/2026-*.eval [--csv metrics.csv] [--dump transcripts/]
+    python -m harness.analyze --single-shot outputs/eval/runs/eval_A_....jsonl
 
 Costs are tokens x list price (PRICES, USD per 1M tokens), computed after the fact: Inspect has
 no price data for these models, so cost_limit is not used during runs (token_limit is).
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import statistics
 import sys
 from collections import Counter
@@ -30,6 +32,11 @@ PRICES = {
     "google/gemini-3.5-flash": (0.75, 0.075, 3.75),
     "google/gemini-3.6-flash": (0.75, 0.075, 3.75),
 }
+SINGLE_SHOT_PRICES = {"openai": PRICES["openai/gpt-5.4-2026-03-05"],
+                      "gemini": PRICES["google/gemini-3.5-flash"]}
+CHARS_PER_TOKEN = 4     # rough rule for English text and code
+FIELDS_CHARS = 300      # REASONING / STRATEGY / CONFIDENCE fields around a resolution
+RETRY_CHARS = 400       # the headings and validator error a retry adds to the prompt
 SCORER = "conflict_file_scorer"
 TRUNCATION_NOTE = "was too long to be displayed"
 N_SCENARIOS = 67
@@ -161,12 +168,56 @@ def summarize(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def single_shot_estimate(run_jsonl: str) -> str:
+    """Rough token cost of a scripts/run_eval.py run, which records no token usage.
+
+    Each record's prompt is rebuilt with the pipeline's own code and its characters are counted. A
+    retry resends the prompt plus the previous attempt (taken to be as long as the final
+    resolution) and the validator error. Visible text only: thinking tokens are not recorded, so
+    they are not counted. Cached-input discounts are ignored."""
+    from conflictagent import solver
+    from harness.dataset import build_samples
+    samples = {s.id: s for s in build_samples()}
+    tot: dict[str, list[float]] = {}
+    for line in Path(run_jsonl).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("kind") != "llm":
+            continue
+        s = samples[r["id"]]
+        window = solver.build_window(s.files[s.metadata["conflict_path"]], s.metadata["target_idx"])
+        system, user = solver.build_prompt("A", window)
+        res = len(r.get("final_resolution") or "")
+        n = r.get("n_rounds") or 1
+        t = tot.setdefault(r["provider"], [0, 0, 0.0, 0.0])
+        t[0] += 1
+        t[1] += n
+        t[2] += n * (len(system) + len(user)) + (n - 1) * (res + RETRY_CHARS)
+        t[3] += n * (res + FIELDS_CHARS)
+    lines = []
+    for prov, (recs, calls, in_c, out_c) in sorted(tot.items()):
+        p_in, _, p_out = SINGLE_SHOT_PRICES[prov]
+        tin, tout = in_c / CHARS_PER_TOKEN, out_c / CHARS_PER_TOKEN
+        lines.append(f"== {prov}: {recs} records, {calls} model calls ({calls / recs:.2f} per "
+                     f"record); ~{tin / 1e3:.0f}k input + ~{tout / 1e3:.0f}k visible output tokens "
+                     f"-> ~${(tin * p_in + tout * p_out) / 1e6:.2f} (estimate, no thinking tokens)")
+    return "\n".join(lines)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("logs", nargs="+")
+    ap.add_argument("logs", nargs="*")
     ap.add_argument("--csv", default=None)
     ap.add_argument("--dump", default=None, help="write one readable transcript per sample here")
+    ap.add_argument("--single-shot", default=None, metavar="RUN_JSONL",
+                    help="estimate the token cost of a scripts/run_eval.py run instead")
     args = ap.parse_args()
+    if args.single_shot:
+        print(single_shot_estimate(args.single_shot))
+        return
+    if not args.logs:
+        ap.error("give Inspect logs, or --single-shot RUN_JSONL")
     rows = collect(args.logs, args.dump)
     print(summarize(rows))
     if args.csv:
