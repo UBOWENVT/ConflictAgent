@@ -1,5 +1,8 @@
 """Recompute the reported ConflictAgent numbers from the frozen results in results/.
 
+The stage-3 figures (the agent setting, docs/HARNESS.md) are recomputed from the three
+results/stage3_* files the same way.
+
 No API key, no LLM calls, standard library only:
 
     python scripts/verify_numbers.py
@@ -12,9 +15,12 @@ ConflictBench labels (which tool outputs were left unresolved); see docs/REPRODU
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import sys
+from decimal import ROUND_HALF_UP, Decimal
+from math import comb
 from collections import Counter
 from pathlib import Path
 
@@ -45,6 +51,70 @@ BOUNDARY = 1e-3  # stored scores are rounded; verdicts this close to the cutoff 
 SHA256 = {  # the frozen files as committed; a mismatch means they were changed after publication
     "meta_evaluation_20260727_062930.jsonl": "1c2f64a3d63bf21e072c9ebee952bd36faca934383fca5e2e6572968c1ba1a8f",
     "solver_eval_20260627_095221.jsonl": "f03a9219fdb4f58222538f43937b88f269abd6d908eff0e277725f550bc2fd36",
+    "stage3_unified_eval_20261010_163404.jsonl": "b7b1627e22034d65ede98b868219c84cf4d3d1dad401498eae62165c1e94e64c",
+    "stage3_agent_metrics_20261010.csv": "8429d67e1ba346309438b7c5ff430bf9ee071cd90bb42d08d93183146e066c55",
+    "stage3_single_shot_20261010.csv": "e93e6100a14996080bb102ca5f5c65f6d15a44def56845315d58343e732b89cc",
+}
+
+# Stage 3: the agent setting (docs/HARNESS.md "Results").
+S3_UNIFIED = ROOT / "results" / "stage3_unified_eval_20261010_163404.jsonl"
+S3_AGENT = ROOT / "results" / "stage3_agent_metrics_20261010.csv"
+S3_SINGLE = ROOT / "results" / "stage3_single_shot_20261010.csv"
+PRESTO = "presto@f50b46c7"
+N_TYPE = {True: 49, False: 18}
+# Secondary convention per outcome; must equal harness/scorers.py OUTCOME_RULES (a test checks it).
+SECONDARY = {"gradeable": "judge", "empty": "exclude", "no_edit": "exclude", "unfinished": "exclude",
+             "markers": "miss", "out_of_block": "judge", "not_extractable": "exclude",
+             "error": "exclude"}
+AGENT_MODEL = {"openai": "openai/gpt-5.4-2026-03-05", "gemini": "google/gemini-3.5-flash"}
+EXPECTED_STAGE3 = {
+    "s3 agent: samples / errors / gradeable / empty": "134 / 0 / 131 / 3",
+    "s3 single-shot rerun: records / errors / empty": "134 / 0 / 0",
+    "s3 unified: verdict rows / judge calls": "402 / 397",
+    "s3 (1) agent, true, openai": "26/49 = 53.1%",
+    "s3 (1) agent, true, gemini": "32/49 = 65.3%",
+    "s3 (1) agent, false, openai": "13/18 = 72.2%",
+    "s3 (1) agent, false, gemini": "11/18 = 61.1%",
+    "s3 (1) single_shot, true, openai": "23/49 = 46.9%",
+    "s3 (1) single_shot, true, gemini": "35/49 = 71.4%",
+    "s3 (1) single_shot, false, openai": "12/18 = 66.7%",
+    "s3 (1) single_shot, false, gemini": "11/18 = 61.1%",
+    "s3 (1) june, true, openai": "27/49 = 55.1%",
+    "s3 (1) june, true, gemini": "29/49 = 59.2%",
+    "s3 (1) june, false, openai": "12/18 = 66.7%",
+    "s3 (1) june, false, gemini": "11/18 = 61.1%",
+    "s3 (1) lower provider, true: agent / single_shot / june": "53.1% / 46.9% / 55.1%",
+    "s3 (1) without presto, agent": "26/48 = 54.2% / 32/48 = 66.7%",
+    "s3 (1) without presto, single_shot": "22/48 = 45.8% / 34/48 = 70.8%",
+    "s3 (1) without presto, june": "26/48 = 54.2% / 29/48 = 60.4%",
+    "s3 (1) secondary: agent openai / agent gemini / june gemini": "26/48 = 54.2% / 32/47 = 68.1% / 29/47 = 61.7%",
+    "s3 paired agent vs single_shot, openai": "18 / 8 / 5 / 18, p = 0.58",
+    "s3 paired agent vs single_shot, gemini": "31 / 1 / 4 / 13, p = 0.38",
+    "s3 paired without presto, openai": "18 / 8 / 4 / 18, p = 0.39",
+    "s3 paired without presto, gemini": "31 / 1 / 3 / 13, p = 0.63",
+    "s3 judge drift (june vs frozen June)": "132/132 unchanged; 23 scores moved, max 0.2",
+    "s3 model drift single_shot vs june, gemini": "6 vs 0, p = 0.031",
+    "s3 model drift without presto, gemini": "5 vs 0, p = 0.063",
+    "s3 model drift single_shot vs june, openai": "2 vs 6, p = 0.29",
+    "s3 (2) agent openai: single / multi": "32/32 = 100% / 16/16 = 100%",
+    "s3 (2) agent gemini: single / multi": "31/32 = 96.9% / 15/15 = 100%",
+    "s3 (2) single_shot openai: single / multi": "31/33 = 93.9% / 16/16 = 100%",
+    "s3 (2) single_shot gemini: single / multi": "32/33 = 97.0% / 16/16 = 100%",
+    "s3 (2) june openai: single / multi": "30/33 = 90.9% / 16/16 = 100%",
+    "s3 (2) june gemini: single / multi": "30/31 = 96.8% / 16/16 = 100%",
+    "s3 calls per scenario, mean (max): agent openai / gemini": "4.7 (14) / 10.6 (27)",
+    "s3 calls per scenario, mean (max): single-shot openai / gemini": "1.19 (4) / 1.10 (4)",
+    "s3 call ratio agent / single-shot, rounded: openai / gemini": "4 / 10",
+    "s3 tool calls bash/view/replace/check: openai": "26 / 293 / 75 / 68",
+    "s3 tool calls bash/view/replace/check: gemini": "256 / 234 / 74 / 81",
+    "s3 ran check_java at least once: openai / gemini": "67/67 / 67/67",
+    "s3 passed check_java only after failing it: openai / gemini": "0 / 6",
+    "s3 limits hit: openai / gemini": "0 / 1",
+    "s3 tool errors: openai / gemini": "8 / 2",
+    "s3 working time per sample, mean: openai / gemini": "11.6 s / 45.2 s",
+    "s3 agent cost: openai / gemini / total": "$2.36 / $3.79 / $6.15",
+    "s3 single-shot cost estimate: openai / gemini": "$0.85 / $0.20",
+    "s3 gate: not extractable / out of block / limits hit": "0/134 / 0/134 / 1/134",
 }
 
 
@@ -91,6 +161,133 @@ def recompute() -> dict[str, str]:
     return got
 
 
+def _pfmt(p: float) -> str:
+    """Two significant digits, halves rounded up, as the docs quote p-values."""
+    d = Decimal(repr(p))
+    return "0" if d == 0 else str(d.quantize(Decimal(1).scaleb(d.adjusted() - 1), rounding=ROUND_HALF_UP))
+
+
+def _mcnemar(b: int, c: int) -> float:
+    n = b + c
+    return 1.0 if n == 0 else min(1.0, 2 * sum(comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n)
+
+
+def _pct(k: int, n: int) -> str:
+    return f"{k}/{n} = 100%" if k == n else _frac(k, n)
+
+
+def _csv(path: Path) -> list[dict]:
+    with path.open(encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def recompute_stage3() -> dict[str, str]:
+    got: dict[str, str] = {}
+    rows = _load(S3_UNIFIED)
+    v = [r for r in rows if r["kind"] == "verdict"]
+    agent = _csv(S3_AGENT)
+    single = _csv(S3_SINGLE)
+    hit = lambda r: r["outcome"] == "gradeable" and r.get("accept") is True  # noqa: E731
+    by = {(r["group"], r["id"], r["provider"]): r for r in v}
+    a = [r for r in v if r["group"] == "agent"]
+    count = lambda rs, o: sum(r["outcome"] == o for r in rs)  # noqa: E731
+    got["s3 agent: samples / errors / gradeable / empty"] = (
+        f"{len(a)} / {count(a, 'error')} / {count(a, 'gradeable')} / {count(a, 'empty')}")
+    got["s3 single-shot rerun: records / errors / empty"] = (
+        f"{len(single)} / {sum(r['status'] == 'error' for r in single)} / "
+        f"{count([r for r in v if r['group'] == 'single_shot'], 'empty')}")
+    got["s3 unified: verdict rows / judge calls"] = f"{len(v)} / {sum(r['judged'] for r in v)}"
+
+    def rs(g, prov, vc, drop=False):
+        return [r for r in v if r["group"] == g and r["provider"] == prov and r["valid_conflict"] is vc
+                and not (drop and r["id"] == PRESTO)]
+    for g in ("agent", "single_shot", "june"):
+        for vc, t in ((True, "true"), (False, "false")):
+            for prov in ("openai", "gemini"):
+                got[f"s3 (1) {g}, {t}, {prov}"] = _frac(sum(map(hit, rs(g, prov, vc))), N_TYPE[vc])
+        got[f"s3 (1) without presto, {g}"] = " / ".join(
+            _frac(sum(map(hit, rs(g, p, True, True))), 48) for p in ("openai", "gemini"))
+    got["s3 (1) lower provider, true: agent / single_shot / june"] = " / ".join(
+        f"{min(sum(map(hit, rs(g, p, True))) for p in ('openai', 'gemini')) / 49:.1%}"
+        for g in ("agent", "single_shot", "june"))
+
+    def secondary(g, prov):
+        counted = [r for r in rs(g, prov, True) if SECONDARY[r["outcome"]] != "exclude"]
+        return _frac(sum(SECONDARY[r["outcome"]] == "judge" and r.get("accept") is True
+                         for r in counted), len(counted))
+    got["s3 (1) secondary: agent openai / agent gemini / june gemini"] = " / ".join(
+        (secondary("agent", "openai"), secondary("agent", "gemini"), secondary("june", "gemini")))
+
+    def paired(x, y, prov, drop=False):
+        ids = sorted({r["id"] for r in rs(x, prov, True, drop)})
+        hx = {i: hit(by[(x, i, prov)]) for i in ids}
+        hy = {i: hit(by[(y, i, prov)]) for i in ids}
+        both = sum(hx[i] and hy[i] for i in ids)
+        ox = sum(hx[i] and not hy[i] for i in ids)
+        oy = sum(hy[i] and not hx[i] for i in ids)
+        return both, ox, oy, len(ids) - both - ox - oy, _pfmt(_mcnemar(ox, oy))
+    for prov in ("openai", "gemini"):
+        b, ox, oy, n, p = paired("agent", "single_shot", prov)
+        got[f"s3 paired agent vs single_shot, {prov}"] = f"{b} / {ox} / {oy} / {n}, p = {p}"
+        b, ox, oy, n, p = paired("agent", "single_shot", prov, True)
+        got[f"s3 paired without presto, {prov}"] = f"{b} / {ox} / {oy} / {n}, p = {p}"
+    _, ox, oy, _, p = paired("single_shot", "june", "gemini")
+    got["s3 model drift single_shot vs june, gemini"] = f"{ox} vs {oy}, p = {p}"
+    _, ox, oy, _, p = paired("single_shot", "june", "gemini", True)
+    got["s3 model drift without presto, gemini"] = f"{ox} vs {oy}, p = {p}"
+    _, ox, oy, _, p = paired("single_shot", "june", "openai")
+    got["s3 model drift single_shot vs june, openai"] = f"{ox} vs {oy}, p = {p}"
+
+    frozen = {(r["id"], r["provider"]): r for r in _load(SOLVER_FILE)}
+    june = [r for r in v if r["group"] == "june" and r["judged"]]
+    same = sum(frozen[(r["id"], r["provider"])]["accept"] == r["accept"] for r in june)
+    moved = [abs(frozen[(r["id"], r["provider"])]["accept_score"] - r["accept_score"]) for r in june]
+    moved = [d for d in moved if d > 1e-9]
+    got["s3 judge drift (june vs frozen June)"] = (
+        f"{same}/{len(june)} unchanged; {len(moved)} scores moved, max {max(moved):.1f}")
+
+    n_blocks = {r["id"]: int(r["n_blocks"]) for r in agent}
+    for g in ("agent", "single_shot", "june"):
+        for prov in ("openai", "gemini"):
+            t = [r for r in rs(g, prov, True) if r["structurally_valid"] is not None]
+            one = [r for r in t if n_blocks[r["id"]] == 1]
+            many = [r for r in t if n_blocks[r["id"]] > 1]
+            got[f"s3 (2) {g} {prov}: single / multi"] = (
+                f"{_pct(sum(r['structurally_valid'] for r in one), len(one))} / "
+                f"{_pct(sum(r['structurally_valid'] for r in many), len(many))}")
+
+    am = {p: [r for r in agent if r["model"] == m] for p, m in AGENT_MODEL.items()}
+    sm = {p: [r for r in single if r["provider"] == p] for p in AGENT_MODEL}
+    num = lambda rs_, k: [float(r[k]) for r in rs_]  # noqa: E731
+    mean = lambda xs: sum(xs) / len(xs)  # noqa: E731
+    got["s3 calls per scenario, mean (max): agent openai / gemini"] = " / ".join(
+        f"{mean(num(am[p], 'model_calls')):.1f} ({max(num(am[p], 'model_calls')):.0f})" for p in AGENT_MODEL)
+    got["s3 calls per scenario, mean (max): single-shot openai / gemini"] = " / ".join(
+        f"{mean(num(sm[p], 'model_calls')):.2f} ({max(num(sm[p], 'model_calls')):.0f})" for p in AGENT_MODEL)
+    got["s3 call ratio agent / single-shot, rounded: openai / gemini"] = " / ".join(
+        f"{mean(num(am[p], 'model_calls')) / mean(num(sm[p], 'model_calls')):.0f}" for p in AGENT_MODEL)
+    for p in AGENT_MODEL:
+        got[f"s3 tool calls bash/view/replace/check: {p}"] = " / ".join(
+            f"{sum(num(am[p], k)):.0f}" for k in ("n_bash", "n_view_file", "n_replace_text", "n_check_java"))
+    got["s3 ran check_java at least once: openai / gemini"] = " / ".join(
+        f"{sum(float(r['n_check_java']) > 0 for r in am[p])}/{len(am[p])}" for p in AGENT_MODEL)
+    got["s3 passed check_java only after failing it: openai / gemini"] = " / ".join(
+        str(sum(r["fixed_after_failed_check"] == "True" for r in am[p])) for p in AGENT_MODEL)
+    got["s3 limits hit: openai / gemini"] = " / ".join(str(sum(bool(r["limit"]) for r in am[p])) for p in AGENT_MODEL)
+    got["s3 tool errors: openai / gemini"] = " / ".join(f"{sum(num(am[p], 'tool_errors')):.0f}" for p in AGENT_MODEL)
+    got["s3 working time per sample, mean: openai / gemini"] = " / ".join(
+        f"{mean(num(am[p], 'working_time_s')):.1f} s" for p in AGENT_MODEL)
+    cost = {p: sum(num(am[p], "cost_usd")) for p in AGENT_MODEL}
+    got["s3 agent cost: openai / gemini / total"] = (
+        f"${cost['openai']:.2f} / ${cost['gemini']:.2f} / ${cost['openai'] + cost['gemini']:.2f}")
+    got["s3 single-shot cost estimate: openai / gemini"] = " / ".join(
+        f"${sum(num(sm[p], 'est_cost_usd')):.2f}" for p in AGENT_MODEL)
+    got["s3 gate: not extractable / out of block / limits hit"] = (
+        f"{count(a, 'not_extractable')}/{len(a)} / {count(a, 'out_of_block')}/{len(a)} / "
+        f"{sum(bool(r['limit']) for r in agent)}/{len(agent)}")
+    return got
+
+
 def integrity_problems() -> list[str]:
     """Checks that would otherwise let wrong data pass silently."""
     problems = []
@@ -106,6 +303,17 @@ def integrity_problems() -> list[str]:
                if abs(r[score] - THRESHOLD) >= BOUNDARY and bool(r[verdict]) != (r[score] >= THRESHOLD)]
         if off:
             problems.append(f"{name}: {len(off)} verdicts disagree with score >= {THRESHOLD}")
+    v = [r for r in _load(S3_UNIFIED) if r["kind"] == "verdict"]
+    dups = [k for k, n in Counter((r["group"], r["id"], r["provider"]) for r in v).items() if n > 1]
+    if dups:
+        problems.append(f"{S3_UNIFIED.name}: {len(dups)} duplicate rows, e.g. {dups[0]}")
+    off = [r for r in v if r["judged"] and abs(r["accept_score"] - THRESHOLD) >= BOUNDARY
+           and bool(r["accept"]) != (r["accept_score"] >= THRESHOLD)]
+    if off:
+        problems.append(f"{S3_UNIFIED.name}: {len(off)} verdicts disagree with score >= {THRESHOLD}")
+    unjudged = [r for r in v if not r["judged"] and r["outcome"] == "gradeable"]
+    if unjudged:
+        problems.append(f"{S3_UNIFIED.name}: {len(unjudged)} gradeable rows without a verdict")
     return problems
 
 
@@ -115,7 +323,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     problems = integrity_problems()
-    for path in (JUDGE_FILE, SOLVER_FILE):
+    for path in (JUDGE_FILE, SOLVER_FILE, S3_UNIFIED, S3_AGENT, S3_SINGLE):
         digest = sha256(path)
         print(f"{path.relative_to(ROOT)}  sha256 {digest[:16]}")
         if digest != SHA256[path.name]:
@@ -123,16 +331,17 @@ def main() -> int:
     for p in problems:
         print(f"INTEGRITY: {p}")
     print()
-    got = recompute()
-    width = max(len(k) for k in EXPECTED)
+    got = {**recompute(), **recompute_stage3()}
+    expected = {**EXPECTED, **EXPECTED_STAGE3}
+    width = max(len(k) for k in expected)
     bad = 0
     print(f"{'figure':<{width}}  {'recomputed':<20}  {'reported':<20}")
-    for key, want in EXPECTED.items():
+    for key, want in expected.items():
         have = got.get(key, "(missing)")
         ok = have == want
         bad += not ok
         print(f"{key:<{width}}  {have:<20}  {want:<20}  {'ok' if ok else 'MISMATCH'}")
-    print(f"\n{len(EXPECTED) - bad}/{len(EXPECTED)} figures match; {len(problems)} integrity problems.")
+    print(f"\n{len(expected) - bad}/{len(expected)} figures match; {len(problems)} integrity problems.")
     return 1 if bad or problems else 0
 
 

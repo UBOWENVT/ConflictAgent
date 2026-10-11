@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-numbers:
+    # Recompute every reported figure from the frozen files in results/ (standard library only).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python scripts/verify_numbers.py
+
+  harness-tests:
+    # Harness unit tests and mock-model end-to-end runs (local sandbox and Docker). No API keys:
+    # every test drives Inspect's mockllm model.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: harness/requirements.txt
+      - run: pip install -r harness/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: conflictbench-${{ hashFiles('scripts/fetch_data.py') }}
+      - name: Fetch ConflictBench data
+        run: test -f data/ConflictBench.xlsx || python scripts/fetch_data.py
+      - run: python -m pytest tests/harness -q

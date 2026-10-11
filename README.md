@@ -40,8 +40,8 @@ Current as of the 2026-07 DeepEval + pipeline-hardening iteration, plus the 2026
 
 The judge and solver figures above can be recomputed from the frozen results in `results/` with no
 API key: `python scripts/verify_numbers.py`. The tool comparison additionally needs the public
-ConflictBench labels; see [docs/REPRODUCE.md](docs/REPRODUCE.md). The agent-setting figures are not
-frozen in `results/` yet; [docs/HARNESS.md](docs/HARNESS.md) lists the commands that produce them.
+ConflictBench labels; see [docs/REPRODUCE.md](docs/REPRODUCE.md). The same script recomputes the
+agent-setting figures ([docs/HARNESS.md](docs/HARNESS.md)) from the `results/stage3_*` files.
 
 ## Architecture
 

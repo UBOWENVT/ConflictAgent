@@ -61,6 +61,15 @@ def secondary(r: dict) -> bool | None:
     return r.get("accept") is True
 
 
+def pfmt(p: float) -> str:
+    """Two significant digits, halves rounded up (0.0625 -> 0.063), as the docs quote p-values."""
+    from decimal import ROUND_HALF_UP, Decimal
+    d = Decimal(repr(p))
+    if d == 0:
+        return "0"
+    return str(d.quantize(Decimal(1).scaleb(d.adjusted() - 1), rounding=ROUND_HALF_UP))
+
+
 def rate(k: int, n: int) -> str:
     return f"{k}/{n} = {k / n:.1%}" if n else "n/a"
 
@@ -147,7 +156,7 @@ def paired(rows: list[dict], a: str, b: str, drop_presto: bool = False) -> list[
         only_b = sum(gb.get(i, False) and not ga.get(i, False) for i in ids)
         neither = len(ids) - both - only_a - only_b
         out.append(f"| {prov} | {both} | {only_a} | {only_b} | {neither} | "
-                   f"{mcnemar_exact(only_a, only_b):.3f} |")
+                   f"{pfmt(mcnemar_exact(only_a, only_b))} |")
     return out
 
 

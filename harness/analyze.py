@@ -1,7 +1,7 @@
 """Per-sample process metrics from Inspect logs, plus a token-cost estimate and extrapolation.
 
     python -m harness.analyze logs/2026-*.eval [--csv metrics.csv] [--dump transcripts/]
-    python -m harness.analyze --single-shot outputs/eval/runs/eval_A_....jsonl
+    python -m harness.analyze --single-shot outputs/eval/runs/eval_A_....jsonl [--csv rounds.csv]
 
 Costs are tokens x list price (PRICES, USD per 1M tokens), computed after the fact: Inspect has
 no price data for these models, so cost_limit is not used during runs (token_limit is).
@@ -168,8 +168,8 @@ def summarize(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def single_shot_estimate(run_jsonl: str) -> str:
-    """Rough token cost of a scripts/run_eval.py run, which records no token usage.
+def single_shot_rows(run_jsonl: str) -> list[dict]:
+    """Per-record rough token use of a scripts/run_eval.py run, which records no token usage.
 
     Each record's prompt is rebuilt with the pipeline's own code and its characters are counted. A
     retry resends the prompt plus the previous attempt (taken to be as long as the final
@@ -178,7 +178,7 @@ def single_shot_estimate(run_jsonl: str) -> str:
     from conflictagent import solver
     from harness.dataset import build_samples
     samples = {s.id: s for s in build_samples()}
-    tot: dict[str, list[float]] = {}
+    rows = []
     for line in Path(run_jsonl).read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -190,16 +190,29 @@ def single_shot_estimate(run_jsonl: str) -> str:
         system, user = solver.build_prompt("A", window)
         res = len(r.get("final_resolution") or "")
         n = r.get("n_rounds") or 1
-        t = tot.setdefault(r["provider"], [0, 0, 0.0, 0.0])
-        t[0] += 1
-        t[1] += n
-        t[2] += n * (len(system) + len(user)) + (n - 1) * (res + RETRY_CHARS)
-        t[3] += n * (res + FIELDS_CHARS)
+        tin = (n * (len(system) + len(user)) + (n - 1) * (res + RETRY_CHARS)) / CHARS_PER_TOKEN
+        tout = n * (res + FIELDS_CHARS) / CHARS_PER_TOKEN
+        p_in, _, p_out = SINGLE_SHOT_PRICES[r["provider"]]
+        rows.append({"provider": r["provider"], "id": r["id"],
+                     "valid_conflict": r.get("valid_conflict"),
+                     "n_blocks": s.metadata["n_blocks"], "status": r.get("status"),
+                     "model_calls": n, "final_valid": r.get("final_valid"),
+                     "est_input_tokens": round(tin), "est_visible_output_tokens": round(tout),
+                     "est_cost_usd": round((tin * p_in + tout * p_out) / 1e6, 6)})
+    return rows
+
+
+def single_shot_estimate(run_jsonl: str) -> str:
+    """Summary of single_shot_rows() per provider."""
     lines = []
-    for prov, (recs, calls, in_c, out_c) in sorted(tot.items()):
+    rows = single_shot_rows(run_jsonl)
+    for prov in sorted({r["provider"] for r in rows}):
+        rs = [r for r in rows if r["provider"] == prov]
+        calls = sum(r["model_calls"] for r in rs)
+        tin = sum(r["est_input_tokens"] for r in rs)
+        tout = sum(r["est_visible_output_tokens"] for r in rs)
         p_in, _, p_out = SINGLE_SHOT_PRICES[prov]
-        tin, tout = in_c / CHARS_PER_TOKEN, out_c / CHARS_PER_TOKEN
-        lines.append(f"== {prov}: {recs} records, {calls} model calls ({calls / recs:.2f} per "
+        lines.append(f"== {prov}: {len(rs)} records, {calls} model calls ({calls / len(rs):.2f} per "
                      f"record); ~{tin / 1e3:.0f}k input + ~{tout / 1e3:.0f}k visible output tokens "
                      f"-> ~${(tin * p_in + tout * p_out) / 1e6:.2f} (estimate, no thinking tokens)")
     return "\n".join(lines)
@@ -215,18 +228,24 @@ def main() -> None:
     args = ap.parse_args()
     if args.single_shot:
         print(single_shot_estimate(args.single_shot))
+        if args.csv:
+            _write_csv(args.csv, single_shot_rows(args.single_shot))
         return
     if not args.logs:
         ap.error("give Inspect logs, or --single-shot RUN_JSONL")
     rows = collect(args.logs, args.dump)
     print(summarize(rows))
     if args.csv:
-        Path(args.csv).parent.mkdir(parents=True, exist_ok=True)
-        with open(args.csv, "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
-            w.writeheader()
-            w.writerows(rows)
-        print(f"per-sample rows -> {args.csv}")
+        _write_csv(args.csv, rows)
+
+
+def _write_csv(path: str, rows: list[dict]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    print(f"per-sample rows -> {path}")
 
 
 if __name__ == "__main__":

@@ -223,8 +223,10 @@ Cost is tokens × list price, computed afterwards.
 ## Results (full run, 2026-10-10)
 
 Every number below comes from the run outputs, through the commands in
-[Reproducing the tables](#reproducing-the-tables). The logs and per-sample outputs are local
-(gitignored).
+[Reproducing the tables](#reproducing-the-tables). The per-sample verdicts and process metrics are
+frozen in `results/stage3_*` (no resolutions or conflict text), and
+`python scripts/verify_numbers.py` recomputes every figure in this section from them, with no API
+key. The Inspect logs and resolutions stay local (gitignored).
 
 ### Runs
 
@@ -292,7 +294,7 @@ from the main comparison.
 | Comparison | Result |
 |---|---|
 | **Judge drift**: June's 132 resolutions re-judged vs the frozen June verdicts | 132/132 verdicts unchanged. The judging was redone: all 132 reasons differ in wording, and 23 scores moved by up to 0.2, but no accept/reject flipped. |
-| **Model drift**: single-shot rerun vs June (same code, same model ids) | Gemini: 6 scenarios accepted only in the rerun, 0 only in June, p = 0.031; **without presto 5 vs 0, p = 0.062**. GPT: 2 vs 6, p = 0.29 (the same without presto). |
+| **Model drift**: single-shot rerun vs June (same code, same model ids) | Gemini: 6 scenarios accepted only in the rerun, 0 only in June, p = 0.031; **without presto 5 vs 0, p = 0.063**. GPT: 2 vs 6, p = 0.29 (the same without presto). |
 
 - **The judge is not perfectly consistent on presto.** Within this one run, the same 2,754-character
   presto resolution was judged four times: accepted at 0.5 and 0.7, rejected at 0.4 and 0.2. The
@@ -400,6 +402,15 @@ The 3 `empty` outcomes:
 .venv-harness/bin/python -m harness.analyze outputs/inspect_logs/full/*.eval
 .venv-harness/bin/python -m harness.analyze \
     --single-shot outputs/eval/runs/eval_A_both_nojudge_stage3_rerun.jsonl
+
+# frozen copies in results/ (free), then the check
+cp outputs/deepeval/unified_stage3_full.jsonl results/stage3_unified_eval_20261010_163404.jsonl
+.venv-harness/bin/python -m harness.analyze outputs/inspect_logs/full/*.eval \
+    --csv results/stage3_agent_metrics_20261010.csv
+.venv-harness/bin/python -m harness.analyze \
+    --single-shot outputs/eval/runs/eval_A_both_nojudge_stage3_rerun.jsonl \
+    --csv results/stage3_single_shot_20261010.csv
+python scripts/verify_numbers.py
 ```
 
 ## Limitations

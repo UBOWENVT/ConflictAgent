@@ -39,3 +39,26 @@ def test_paired_counts():
             row("a", "s3", "gradeable", True), row("b", "s3", "gradeable", True)]
     line = paired(rows, "a", "b")[2]
     assert line.startswith("| openai | 1 | 1 | 1 | 0 |")
+
+
+def test_verify_numbers_matches_the_scoring_rules_and_passes():
+    """scripts/verify_numbers.py recomputes the stage-3 figures with the standard library only, so it
+    carries its own copy of the secondary convention; it must match OUTCOME_RULES."""
+    import importlib.util
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from harness.scorers import OUTCOME_RULES
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "verify_numbers.py"
+    spec = importlib.util.spec_from_file_location("verify_numbers", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.SECONDARY == {k: v[1] for k, v in OUTCOME_RULES.items()}
+    assert subprocess.run([sys.executable, str(path)], capture_output=True).returncode == 0
+
+
+def test_pfmt_rounds_half_up():
+    from harness.report import pfmt
+    assert [pfmt(p) for p in (0.0625, 0.625, 0.03125, 0.581, 1.0)] == ["0.063", "0.63", "0.031", "0.58", "1.0"]
