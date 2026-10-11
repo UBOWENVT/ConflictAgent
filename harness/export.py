@@ -82,21 +82,26 @@ def sample_record(log_: EvalLog, sample: EvalSample) -> dict:
 
 def export_records(log_paths: list[str]) -> list[dict]:
     """One record per (scenario, model). When a sample appears in several logs (eval-retry), the
-    latest log wins unless its copy errored and an earlier one did not."""
+    latest run of it wins unless that copy errored and an earlier one did not. "Latest" is the
+    sample's first event timestamp (microseconds), not the log's creation time, which has
+    one-second resolution and ties for runs started within the same second."""
     chosen: dict[tuple[str, str], dict] = {}
-    logs = [read_eval_log(p) for p in log_paths]
-    for lg in sorted(logs, key=lambda x: x.eval.created):
+    runs = []
+    for p in log_paths:
+        lg = read_eval_log(p)
         if lg.status not in ("success", "error"):
             log.warning("%s: status %s", lg.location, lg.status)
         for sample in lg.samples or []:
             if sample.epoch != 1:
                 raise ValueError(f"{lg.location}: epoch {sample.epoch}; one epoch expected")
-            rec = sample_record(lg, sample)
-            key = (rec["id"], rec["model"])
-            prev = chosen.get(key)
-            if prev is not None and rec["outcome"] == "error" and prev["outcome"] != "error":
-                continue
-            chosen[key] = rec
+            started = sample.events[0].timestamp.isoformat() if sample.events else lg.eval.created
+            runs.append((started, lg.eval.created, sample_record(lg, sample)))
+    for _, _, rec in sorted(runs, key=lambda t: (t[0], t[1])):
+        key = (rec["id"], rec["model"])
+        prev = chosen.get(key)
+        if prev is not None and rec["outcome"] == "error" and prev["outcome"] != "error":
+            continue
+        chosen[key] = rec
     records = sorted(chosen.values(), key=lambda r: (r["model"], r["id"]))
     dev = developer_regions({r["id"] for r in records})
     for r in records:
