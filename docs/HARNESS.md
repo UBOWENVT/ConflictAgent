@@ -19,6 +19,25 @@ ablation.
 > Status: one full scored run, 2026-10-10. Results, the failure analysis and the limitations are
 > at the end of this page.
 
+## At a glance
+
+```mermaid
+flowchart TD
+    S["ConflictBench scenario<br/>base, left, right"] --> M["git merge-file --diff3<br/>tagged conflict file"]
+    M --> P["Single-shot pipeline<br/>one call, validate, retry<br/>(at most 4 attempts)"]
+    M --> X["Docker sandbox<br/>the tagged file + sides/base, left, right<br/>no network, no credentials"]
+    X --> A["Agent<br/>view_file, replace_text, check_java, bash, submit"]
+    A --> F["Scorer<br/>extract the block from the final file:<br/>outcome and (2)"]
+    F --> E["export: Inspect logs to JSONL"]
+    P --> J["One judge instance, offline<br/>groups: agent, single-shot rerun, June"]
+    E --> J
+    C["child: the developer's resolution"] -.->|"the reference, read only after the runs"| J
+    J --> R["(1) developer-match, (2) validity,<br/>paired comparison, failure analysis"]
+```
+
+The model never sees `child`. Both settings start from the same tagged conflict file, and one
+judge instance scores both of them, plus the June outputs.
+
 ## One scenario, end to end
 
 `junit4@4c8d3ff5`, the smallest file in the population, as it went through the full run. Each step
@@ -101,6 +120,7 @@ harness/
   prompts.py       agent instructions
   export.py        Inspect logs -> run_eval.py-schema JSONL for the offline judge
   analyze.py       per-sample process metrics, process signals and token cost
+  report.py        result tables from the unified scoring output
   sandbox/         Dockerfile, compose.yaml, check_java.py (+ a byte-identical validate.py)
 evaluation/run_unified_eval.py   one judge instance over several groups of resolutions
 tests/harness/                   unit, mock end-to-end (local and Docker) tests
@@ -653,7 +673,9 @@ of the frozen scoring file, and recomputes the counts and the agreement from the
   `insertNullEvery(int, Iterable<?>[])` and `insertNullEvery(int, Iterable<T>)` as duplicates,
   because it ignores array dimensions. These two methods lie outside the block, so no resolution
   of this file can pass (2) or `check_java`, in either setting. In the agent run this led GPT to
-  delete the block. The tables give rates without presto; the fix is left for later.
+  delete the block. The tables give rates without presto. Both fixes are left for later: the
+  duplicate check should compare array dimensions, and scenarios whose developer region contains
+  conflict markers should be guarded against.
 - **One reference resolution.** The developer's resolution is one acceptable answer, not the only
   one. It is sometimes redundant (in lanproxy the developer's file imports `Unpooled` twice), and
   it often reflects a choice that the file alone does not explain (M2 in the
