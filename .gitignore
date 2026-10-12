@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-harness/
 venv/
 *.egg-info/
 .pytest_cache/
@@ -17,6 +18,10 @@ data/*
 # Experiment outputs / logs
 outputs/
 *.log
+
+# Inspect AI eval logs (carry full file contents; frozen results go in results/ as per-sample tables)
+logs/
+*.eval
 
 # DeepEval local cache / telemetry / config (auto-generated at runtime)
 .deepeval/

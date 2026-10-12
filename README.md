@@ -11,7 +11,8 @@ LLM agent and the evaluation pipeline.
 
 ## Current Status
 
-Current as of the 2026-07 DeepEval + pipeline-hardening iteration.
+Current as of the 2026-07 DeepEval + pipeline-hardening iteration, plus the 2026-10 agent harness
+(last bullet).
 
 - Reconstructable Java scenarios: 93 of 106 Java ConflictBench scenarios.
 - Solvers: OpenAI `gpt-5.4-2026-03-05` and Gemini `gemini-3.5-flash` (forced-resolution mode).
@@ -23,14 +24,28 @@ Current as of the 2026-07 DeepEval + pipeline-hardening iteration.
   providers; pooled 58.3%). LLM vs the five traditional tools (coverage-fair, n=49 true): LLM 55–59%
   vs strongest tool AutoMerge 38.8%. The edge is coverage: the tools leave 20–92% of these conflicts
   unresolved, while the LLM under forced resolution attempts every one.
-- Structural validity on true conflicts: 95.8% (deterministic check, no LLM).
+- Structural validity on true conflicts: 95.8% (deterministic check, no LLM). On single-block
+  files, where the whole spliced file is parsed, it is 93.8%; on multi-block files only the absence
+  of conflict markers can be checked. See the corrections in [docs/RESULTS.md](docs/RESULTS.md).
 - The agent also supports a detection mode (Scheme B: the model may declare a true conflict and
   decline to resolve). It was run in an earlier milestone and is not re-scored by the current GEval
   judge.
+- Agent setting ([docs/HARNESS.md](docs/HARNESS.md)): the same models as tool-using agents in a
+  Docker sandbox ([Inspect AI](https://inspect.aisi.org.uk/)), working on the conflict file and its
+  three versions. On the same 49 true conflicts and under the same judge, the agent and a same-day
+  rerun of the pipeline are comparable: lower provider 53.1% vs 46.9%, with no significant
+  per-scenario difference for either model, and the direction differs by model (Gemini: 65.3% vs
+  71.4%). (The rerun's GPT rate is below June's 55.1% through
+  run-to-run variation, also not significant.) The agent made about 4–10 times as many model
+  calls. A failure analysis of the 52 agent misses finds 14 on the evaluation side (equivalent
+  resolutions judged wrong, deletions that were not judged, or no matchable reference); the largest class of real differences is
+  keeping both sides' changes where the developer kept one.
 
 The judge and solver figures above can be recomputed from the frozen results in `results/` with no
 API key: `python scripts/verify_numbers.py`. The tool comparison additionally needs the public
-ConflictBench labels; see [docs/REPRODUCE.md](docs/REPRODUCE.md).
+ConflictBench labels; see [docs/REPRODUCE.md](docs/REPRODUCE.md). The same script recomputes the
+main agent-setting figures ([docs/HARNESS.md](docs/HARNESS.md)) from the `results/stage3_*` files;
+the rest come from the local run logs.
 
 ## Architecture
 
@@ -121,6 +136,7 @@ python scripts/compare_tools_geval.py --llm results/solver_eval_20260627_095221.
 ```text
 conflictagent/      core package: data, conflict reconstruction, solver, agent loop, validation
 evaluation/         DeepEval suite: judge meta-evaluation and solver scoring
+harness/            agent setting: Inspect AI task, tools, Docker sandbox, scoring rules
 scripts/            data fetch, solver runs, comparisons, diagnostics
 results/            frozen judge and solver results behind the reported numbers
 docs/               project documentation
@@ -136,6 +152,8 @@ Start with [docs/SPEC.md](docs/SPEC.md), then [docs/ARCHITECTURE.md](docs/ARCHIT
 - [docs/SPEC.md](docs/SPEC.md): stable current design.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): code and data-flow map.
 - [docs/RESULTS.md](docs/RESULTS.md): grounded results and interpretation.
+- [docs/HARNESS.md](docs/HARNESS.md): the agent setting (Inspect AI + Docker): design, scoring
+  rules, results and limitations.
 - [docs/CASE_STUDIES.md](docs/CASE_STUDIES.md): representative examples for explaining metrics.
 - [docs/DATA.md](docs/DATA.md): ConflictBench schema, reconstruction, and gotchas.
 - [docs/PROMPTS.md](docs/PROMPTS.md): exact solver prompts.

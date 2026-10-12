@@ -45,11 +45,13 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="only the first N cases (cheap check)")
     ap.add_argument("--threshold", type=float, default=0.5, help="① GEval score -> accept cutoff")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--complete", default=None,
+                    help="complete-set JSONL to score (default: outputs/eval/eval_A_complete.jsonl)")
     args = ap.parse_args()
 
     setup_logging(tag="solver_eval")
 
-    cases = dataset.build_solver_testcases()
+    cases = dataset.build_solver_testcases(Path(args.complete) if args.complete else None)
     if args.limit:
         cases = cases[:args.limit]
     acc_metric = metrics.resolution_acceptability_metric(threshold=args.threshold)

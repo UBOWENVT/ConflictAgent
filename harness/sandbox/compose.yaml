@@ -1,0 +1,15 @@
+# Inspect creates one project (one fresh container) per sample and removes it afterwards.
+# Deliberately no `environment:` / `env_file:` and no SAMPLE_METADATA_* interpolation:
+# nothing from the host environment or the sample metadata reaches the container.
+services:
+  default:
+    build: .
+    image: conflictagent-sandbox:0.1
+    init: true
+    command: ["tail", "-f", "/dev/null"]
+    network_mode: none
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
