@@ -498,7 +498,8 @@ no kappa is reported.
     whose labels the author had not seen, agreement was 3/4.
   - The remaining disagreements were about counting changes relative to base, which the codebook
     now states explicitly.
-- **Overall:** 7/15.
+- **Overall:** 7/15 on first labels. After the discussion, the author agreed with the final label
+  on all 15.
 - **After the revision**, only the M1 rule was re-applied to all labels, by script: 2 labels changed
   from M2 to M1. The other revisions changed wording only.
 
@@ -581,7 +582,10 @@ of the frozen scoring file, and recomputes the counts and the agreement from the
 - **Empty resolutions are not judged.** Deleting the block can be a valid resolution (2 cases here,
   both probably equivalent), but the pre-registered rule counts it as a miss.
 - **The failure labels come from one annotator**, an LLM coding agent, checked by the author on 15
-  random cases (raw agreement 7/15; see [Agreement](#failure-analysis)).
+  random cases (raw agreement 7/15; see [Agreement](#failure-analysis)). The annotator and the
+  judge are both Claude models, and the cards showed the judge's reason, so the labels may lean
+  toward the judge's reading. The author saw the same cards, so the spot check offsets this only in
+  part.
 - **(2) on multi-block files** checks markers only. The other blocks keep their markers, so the
   file cannot be parsed.
 - **Single-shot cost is an estimate** (see above).

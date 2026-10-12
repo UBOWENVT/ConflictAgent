@@ -15,7 +15,7 @@ python scripts/verify_numbers.py
 | `stage3_unified_eval_20261010_163404.jsonl` | 402 + 2 | one (group × scenario × provider) verdict of the stage-3 unified scoring: groups `agent`, `single_shot` (same-day rerun) and `june`; outcome, ① verdict, score and reason, ② result. Header rows: run metadata and the judge's evaluation steps |
 | `stage3_agent_metrics_20261010.csv` | 134 | one agent sample: outcome, tool calls, check_java use, limits, tokens, cost, time (`harness/analyze.py`) |
 | `stage3_single_shot_20261010.csv` | 134 | one single-shot rerun record: model calls (attempts) and the token estimate (`harness/analyze.py --single-shot`) |
-| `stage3_failure_labels_20261012.csv` | 62 | one labeled miss: the 52 agent misses and the 10 single-shot-only misses, with the final and first-codebook labels, a reading note, and the author's spot-check label where sampled (`docs/HARNESS.md`, Failure analysis) |
+| `stage3_failure_labels_20261012.csv` | 62 | one labeled miss: the 52 agent misses and the 10 single-shot-only misses, with the final and first-codebook labels, a reading note, and, where sampled, the author's first spot-check label and whether the author agreed with the final label after discussion (`docs/HARNESS.md`, Failure analysis) |
 | `stage3_process_signals_20261012.csv` | 134 | one agent sample: whether it searched the files, probed the environment, ran `check_java` before editing, read the checker's source (`harness/analyze.py --signals`) |
 
 They contain verdicts, scores, the judge's short reasons and the failure labels' reading notes; they

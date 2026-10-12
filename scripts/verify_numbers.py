@@ -55,7 +55,7 @@ SHA256 = {  # the frozen files as committed; a mismatch means they were changed 
     "stage3_unified_eval_20261010_163404.jsonl": "b7b1627e22034d65ede98b868219c84cf4d3d1dad401498eae62165c1e94e64c",
     "stage3_agent_metrics_20261010.csv": "8429d67e1ba346309438b7c5ff430bf9ee071cd90bb42d08d93183146e066c55",
     "stage3_single_shot_20261010.csv": "e93e6100a14996080bb102ca5f5c65f6d15a44def56845315d58343e732b89cc",
-    "stage3_failure_labels_20261012.csv": "745167841b1125761331b9573fad205f03bc1443e6c1b68f9050e474f938d474",
+    "stage3_failure_labels_20261012.csv": "fd89ef632a9fb4696e59617cee8f2d80a49d0dd642c0117f73dbc33f00d8ca12",
     "stage3_process_signals_20261012.csv": "d80220f93051d78899b77f9021d71275b7728798a1c76a4b02820e99eacb90af",
 }
 
@@ -135,6 +135,7 @@ EXPECTED_FAILURES = {
     "s3 failures: single-shot only M3 / M1 / M6": "7 / 2 / 1 of 10",
     "s3 failures: agent only E / M2 / M1 / M3 / M4": "3 / 3 / 1 / 1 / 1 of 9",
     "s3 spot check: round 1 / round 2 / round 2 unseen / all": "3/8 / 4/7 / 3/4 / 7/15",
+    "s3 spot check: author agrees with the final label after discussion": "15/15",
     "s3 signals: openai searched, accepted yes / no, Fisher p": "13/18 = 72% / 26/49 = 53%, p = 0.18",
     "s3 signals: gemini probed, accepted yes / no, Fisher p": "11/20 = 55% / 32/47 = 68%, p = 0.40",
     "s3 signals: gemini checked before editing / read checker source": "6/67 / 1/67",
@@ -268,6 +269,8 @@ def recompute_failures() -> dict[str, str]:
     got["s3 spot check: round 1 / round 2 / round 2 unseen / all"] = (
         f"{agree(r1, 'label_v1')}/{len(r1)} / {agree(r2, 'label')}/{len(r2)} / "
         f"{agree(unseen, 'label')}/{len(unseen)} / {agree(r1, 'label_v1') + agree(r2, 'label')}/{len(spot)}")
+    got["s3 spot check: author agrees with the final label after discussion"] = (
+        f"{sum(r['author_agrees_after_discussion'] == 'True' for r in spot)}/{len(spot)}")
 
     sig = _csv(S3_SIGNALS)
     prov = {m: p for p, m in AGENT_MODEL.items()}
