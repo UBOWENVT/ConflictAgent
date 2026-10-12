@@ -282,7 +282,8 @@ unresolved; the LLM under Scheme A attempts all of them).
 - Agent setting (2026-10, [HARNESS.md](HARNESS.md)): on the same 49 true conflicts, under the same
   judge, a tool-using agent in a Docker sandbox and a same-day rerun of this pipeline are comparable
   (lower provider 53.1% vs 46.9%; per-scenario McNemar p = 0.58 for GPT, 0.38 for Gemini). The
-  agent made about 4 (GPT) and 10 (Gemini) times as many model calls.
+  direction differs by model: GPT-5.4 scored higher with the agent, Gemini with single-shot (65.3%
+  vs 71.4%). The agent made about 4 (GPT) and 10 (Gemini) times as many model calls.
 - *Earlier milestone (hand-built judge; not re-scored by the current suite):* Schemes A and B
   agreed closely, so forcing the model to
   declare conflict-ness first (B) does not change the aggregate result; B's punts are rare but
@@ -313,3 +314,5 @@ unresolved; the LLM under Scheme A attempts all of them).
 - `javalang` checks syntax, not full Java compilation. For multi-block files where the spliced file
   still carries other blocks' markers, ② degrades to a marker-only check (no whole-file parse).
 - Standalone-valid is meaningful only for false conflicts.
+- Possible contamination: ConflictBench is built from public repositories, so the solver models may
+  have seen the upstream merges during training.

@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   verify-numbers:
-    # Recompute every reported figure from the frozen files in results/ (standard library only).
+    # Recompute the figures listed in scripts/verify_numbers.py from the frozen files in results/
+    # (standard library only).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

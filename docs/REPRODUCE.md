@@ -4,7 +4,7 @@ The judge and solver numbers are not "run-once-and-gone" — they are simple agg
 JSONL files**, committed under `results/`. To reproduce them, just count over those two files; **no LLM
 calls needed**. The fastest path is `python scripts/verify_numbers.py`, which recomputes the judge and solver
 figures in §1–2 and checks them against the reported values. The tool comparison at the end of §2
-also needs the ConflictBench labels. The same script also recomputes the agent-setting figures of
+also needs the ConflictBench labels. The same script also recomputes the main agent-setting figures of
 `docs/HARNESS.md` from the `results/stage3_*` files; that page lists how those files were produced.
 
 | Metric | File on disk | Rows | What each row is |

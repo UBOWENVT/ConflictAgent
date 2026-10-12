@@ -1,4 +1,5 @@
-"""Agent instructions (first version; the final text is recorded in docs/PROMPTS.md).
+"""Agent instructions, as used in the full run (docs/HARNESS.md describes the two notes added after
+the first trial).
 
 The per-sample task message (file path, tag line, number of other regions) is built in
 harness/dataset.py. Like the single-shot prompt, nothing here mentions the developer or any label.

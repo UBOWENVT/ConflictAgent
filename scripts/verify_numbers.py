@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import random
 import sys
 from decimal import ROUND_HALF_UP, Decimal
 from math import comb
@@ -123,6 +124,7 @@ EXPECTED_STAGE3 = {
 }
 # Failure analysis (docs/HARNESS.md "Failure analysis"); codes in the codebook's precedence order.
 CODES = ("E3", "E2", "E1", "M1", "M5", "M4", "M3", "M2")
+SPOT_CHECK_SEED, SPOT_CHECK_N = 20261010, 15  # the author's sample: Random(seed).sample(sorted misses, n)
 EXPECTED_FAILURES = {
     "s3 failures: agent misses openai / gemini / total": "28 / 24 / 52",
     "s3 failures E3/E2/E1/M1/M5/M4/M3/M2: openai": "2 / 0 / 6 / 5 / 1 / 1 / 3 / 10",
@@ -435,6 +437,12 @@ def integrity_problems() -> list[str]:
         have = [(r["id"], r["provider"]) for r in labels if r["setting"] == setting]
         if len(have) != len(set(have)) or set(have) != want:
             problems.append(f"{S3_LABELS.name}: {setting} rows do not match the {setting} misses")
+    agent_rows = [r for r in labels if r["setting"] == "agent"]
+    drawn = random.Random(SPOT_CHECK_SEED).sample(sorted((r["provider"], r["id"]) for r in agent_rows),
+                                                 SPOT_CHECK_N)
+    spot = sorted((int(r["spot_check"]), (r["provider"], r["id"])) for r in agent_rows if r["spot_check"])
+    if [k for _, k in spot] != drawn:
+        problems.append(f"{S3_LABELS.name}: spot-check rows do not reproduce the seeded draw")
     bad = [r for r in labels if r["label"] not in CODES + ("M6",)]
     if bad:
         problems.append(f"{S3_LABELS.name}: {len(bad)} rows with an unknown code")

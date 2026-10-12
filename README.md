@@ -34,7 +34,8 @@ Current as of the 2026-07 DeepEval + pipeline-hardening iteration, plus the 2026
   Docker sandbox ([Inspect AI](https://inspect.aisi.org.uk/)), working on the conflict file and its
   three versions. On the same 49 true conflicts and under the same judge, the agent and a same-day
   rerun of the pipeline are comparable: lower provider 53.1% vs 46.9%, with no significant
-  per-scenario difference for either model. (The rerun's GPT rate is below June's 55.1% through
+  per-scenario difference for either model, and the direction differs by model (Gemini: 65.3% vs
+  71.4%). (The rerun's GPT rate is below June's 55.1% through
   run-to-run variation, also not significant.) The agent made about 4–10 times as many model
   calls. A failure analysis of the 52 agent misses finds 14 on the evaluation side (equivalent
   resolutions judged wrong, deletions that were not judged, or no matchable reference); the largest class of real differences is
@@ -43,7 +44,8 @@ Current as of the 2026-07 DeepEval + pipeline-hardening iteration, plus the 2026
 The judge and solver figures above can be recomputed from the frozen results in `results/` with no
 API key: `python scripts/verify_numbers.py`. The tool comparison additionally needs the public
 ConflictBench labels; see [docs/REPRODUCE.md](docs/REPRODUCE.md). The same script recomputes the
-agent-setting figures ([docs/HARNESS.md](docs/HARNESS.md)) from the `results/stage3_*` files.
+main agent-setting figures ([docs/HARNESS.md](docs/HARNESS.md)) from the `results/stage3_*` files;
+the rest come from the local run logs.
 
 ## Architecture
 

@@ -19,6 +19,77 @@ ablation.
 > Status: one full scored run, 2026-10-10. Results, the failure analysis and the limitations are
 > at the end of this page.
 
+## One scenario, end to end
+
+`junit4@4c8d3ff5`, the smallest file in the population, as it went through the full run. Each step
+names the section below that defines it.
+
+**0. The conflict.** `src/main/java/junit/runner/Version.java` (18 lines) returns JUnit's version
+string. Both sides changed the same line:
+
+| Version | The line | Meaning |
+|---|---|---|
+| base | `return "4.10-SNAPSHOT";` | 4.10 in development |
+| left | `return "4.11-SNAPSHOT";` | development moves on to 4.11 |
+| right | `return "4.10";` | the 4.10 release |
+| developer (`child`) | `return "4.11-SNAPSHOT";` | kept left |
+
+ConflictBench labels it a true conflict.
+
+**1. The conflict file** ([Samples](#samples)). `git merge-file --diff3` on base, left and right
+gives a 24-line file with one conflict block. The block's first line is tagged:
+
+```java
+	public static String id() {
+<<<<<<< left   [[RESOLVE THIS CONFLICT]]
+		return "4.11-SNAPSHOT";
+||||||| base
+		return "4.10-SNAPSHOT";
+=======
+		return "4.10";
+>>>>>>> right
+	}
+```
+
+**2a. Single-shot.**
+- The file is under 400 lines, so the prompt shows it whole.
+- Each model answered in one call with `return "4.11-SNAPSHOT";`.
+- The pipeline spliced the answer into the file and validated it: no markers, parses, no duplicate
+  declarations. No retry was needed.
+
+**2b. Agent** ([Sandbox](#sandbox), [Agent and tools](#agent-and-tools)). In a fresh container with no
+network, the workspace holds the tagged file and `sides/{base,left,right}/<path>`, nothing else (the
+image adds Python, javalang and the checker). GPT-5.4 took 4
+model calls:
+1. `view_file` on all four files, in one call;
+2. `replace_text`: lines 12–18 (the whole block) → `return "4.11-SNAPSHOT";`;
+3. `check_java` → `PASS: no conflict markers remain and the file parses as Java.`;
+4. `submit`: "Resolved the tagged conflict by keeping the updated snapshot version string …".
+
+Gemini took 7 calls. It opened only the conflict file, ran `ls -la` and `find . -type f`, made the
+same replacement, viewed the file again, ran `check_java` and submitted. The cost was $0.018 (GPT-5.4, 8.3 s) and $0.024 (Gemini, 25.7 s).
+
+**3. Extracting the resolution** ([Scoring rules](#scoring-rules)). The final file is the original
+prefix, one new line, and the original suffix, byte for byte. So the extraction is `exact`, the
+outcome is `gradeable`, and the resolution is `return "4.11-SNAPSHOT";`.
+
+**4. The reference.** Offline, the developer's resolution of the same block is cut from `child`,
+located by the unchanged lines just before and after the block. The model never sees `child`.
+
+**5. (1) developer-match.**
+- The judge gets the conflict block, the resolution and the developer's resolution.
+- All six resolutions of this scenario scored 1.0 and were accepted: agent, single-shot rerun and
+  June, for each of the two models.
+- The judge's reason: "The Actual Output exactly matches the Expected Output, returning
+  '4.11-SNAPSHOT' which corresponds to the left side of the conflict. …"
+
+**6. (2) structural validity.** The file with the resolution spliced in has no markers, parses, and
+has no duplicate declarations.
+
+Everything in [Results](#results-full-run-2026-10-10) is this, repeated for 67 scenarios × 2 models
+in each setting. In this scenario both settings got it right; the agent took 4 and 7 model calls
+where single-shot took 1.
+
 ## Layout
 
 ```text
@@ -77,7 +148,7 @@ from the prompt.
 | No network | `network_mode: none` |
 | No credentials | No `environment` / `env_file` in `compose.yaml`. The container sees only the base image's variables. |
 | No answers or data | The build context is `harness/sandbox/` only (`.dockerignore` admits 2 files). The image holds Python, javalang and the checker. |
-| Not root | Runs as uid 1000 (`agent`). The checker in `/opt/harness` is root-owned. |
+| Not root | Runs as uid 1000 (`agent`). The checker in `/opt/harness` is root-owned, so the model cannot change it, but it can read it (one sample did; see [Failure analysis](#failure-analysis)). |
 | Resource caps | 1 CPU, 1 GB memory, 256 processes. All capabilities dropped, `no-new-privileges`. |
 | Pinned image | `python:3.12-slim` by digest, `javalang==0.13.0` |
 
@@ -112,7 +183,7 @@ the conflict file left in the sandbox, not the submitted text.**
   malformed region).
 - **Single-block file:** pass if the whole file parses with javalang and has no duplicate
   declarations.
-- **Multi-block file:** pass if exactly *original − 1* untouched regions remain; their markers are
+- **Multi-block file:** pass if exactly *original − 1* well-formed regions remain; their markers are
   expected. As an informational signal (never a pass condition), it also reports whether the file
   parses with the remaining regions replaced by their left side.
 
@@ -123,12 +194,13 @@ file. Scoring treats an empty resolution as described below.
 left at each provider's default. `fail_on_error=0.05`; interrupted runs continue with
 `inspect eval-retry`.
 
-These were set after a first trial (10 scenarios × 2 models) that used 40 messages. That limit cut
-off 3 of the 10 Gemini samples, which spent many steps looking for repository files and git that
-the sandbox does not have. Two short notes were then added to the prompt: that the four files are
-all there is (no repository, no git), and the step budget. Both changes are generic (environment
-facts and limits), not tied to any scenario. Trial runs are for debugging only and do not feed
-any reported number.
+These were set after a first trial (10 scenarios × 2 models) with 40 messages and 400,000 tokens.
+The message limit cut off 3 of the 10 Gemini samples, which spent many steps looking for
+repository files and git that the sandbox does not have. Two short notes were then added to the
+prompt: that the four files are all there is (no repository, no git), and the step budget. The
+message and token limits were raised to the values above. Both changes are generic (environment facts and limits),
+not tied to any scenario. A second trial on the same 10 scenarios then checked the changes. Trial
+runs are for debugging only and do not feed any reported number.
 
 **Models.** `openai/gpt-5.4-2026-03-05` and `google/gemini-3.5-flash`, the same ids as the
 single-shot runs. Google now routes `gemini-3.5-flash` requests to `gemini-3.6-flash`: the
@@ -207,8 +279,7 @@ in Dataset B:
 - the file parses (javalang);
 - no duplicate declarations.
 
-If other blocks still carry markers, only the marker check applies. Whether the agent's final file
-parses as a whole is reported separately as a process metric, not as (2).
+If other blocks still carry markers, only the marker check applies (see [Limitations](#limitations)).
 
 ### 5. Process metrics
 
@@ -217,7 +288,10 @@ From the logs (`harness/analyze.py`):
 - tool errors, including argument-parsing errors, and truncated tool outputs;
 - whether `check_java` ran before `submit`, and whether a failed check was later fixed;
 - limits hit;
-- tokens (input, cached, output, reasoning) and time.
+- tokens (input, cached, output, reasoning) and time;
+- for the failure analysis, yes/no process signals (`--signals`): whether the agent searched the
+  files, probed the environment, ran `check_java` before its first edit, or read the checker's
+  source.
 
 Cost is tokens × list price, computed afterwards.
 
@@ -225,9 +299,11 @@ Cost is tokens × list price, computed afterwards.
 
 Every number below comes from the run outputs, through the commands in
 [Reproducing the tables](#reproducing-the-tables). The per-sample verdicts and process metrics are
-frozen in `results/stage3_*` (no resolutions or conflict text), and
-`python scripts/verify_numbers.py` recomputes every figure in this section from them, with no API
-key. The Inspect logs and resolutions stay local (gitignored).
+frozen in `results/stage3_*`. These files hold no conflict files and no full resolutions; the
+judge's reasons and the failure labels' notes quote short fragments. `python
+scripts/verify_numbers.py` recomputes the figures listed in it from these files, with no API key.
+The other figures (for example the tool-error details, the presto judgments and the end-to-end
+example) need the Inspect logs and resolutions, which stay local (gitignored).
 
 ### Runs
 
@@ -305,7 +381,8 @@ from the main comparison.
 - So one of Gemini's 6 model-drift scenarios is judge noise: June's and the rerun's resolutions are
   byte-identical. Without it, the change is 5 vs 0 and not significant at 0.05. Its direction is
   consistent with the routing to 3.6 Flash, but this run does not establish that the model got
-  better.
+  better. Two of the 6 (`jedis@b013a74c`, `jjwt@3f079803`) are scenarios where June's Gemini
+  returned an empty resolution.
 - GPT's dated model id is unchanged. Its resolutions differ from June's on 14 of 49 true conflicts,
   and its verdicts on 8: run-to-run variation, even at temperature 0.
 
@@ -391,24 +468,27 @@ The 3 `empty` outcomes:
 **Codebook.** The classes describe how a resolution differs from the developer's. They do not say
 which of the two is right: the developer's resolution is one acceptable answer, not the only one.
 
-- A *change* is what one side did relative to base: a line added, removed or edited.
+- A *change* is what one side did relative to base: a line added, removed or edited. Differences
+  in whitespace and comments alone do not count.
 - **E** is the evaluation side: the resolution is equivalent to the developer's, or cannot be
   compared with it.
 - **M** is a real difference in code. It may be the model's mistake, or the developer's choice.
 
-Precedence runs from top to bottom; the first class that applies is the label.
+Precedence runs from top to bottom; the first class that applies is the label. M6, which only
+single-shot can produce, is checked before the other M classes: when the output reaches beyond the
+block, its content cannot be compared line for line.
 
 | Code | Class | Rule |
 |---|---|---|
-| E3 | No matchable reference | The developer region still contains conflict markers, or uses a value that none of base, left and right has. No resolution could match it. A reference that is only redundant (say, a duplicate import) is not E3. |
+| E3 | No matchable reference | No resolution built from the three versions could match the developer region: it still contains conflict markers, or it holds a value that none of the versions has and none can supply (such as a timestamp generated at merge time). A reference that is only redundant (say, a duplicate import), or that joins the two sides' code, or adds an import that a side's wildcard already covers, is not E3. |
 | E2 | Deleted, not judged | The resolution is empty. Empty resolutions are not judged and count as misses (pre-registered). |
 | E1 | Equivalent, judged wrong | The difference is only in comments or whitespace, or the same classes end up imported (a wildcard covers them, or the file imports them outside the block). |
-| M1 | Took a different whole version | Both sides changed the block. The developer region equals one version (left, right or base) and the resolution another, ignoring whitespace and comments. |
+| M6 | Over-scoped output | Single-shot only: the returned resolution includes code from outside the block. The agent edits the block in place, so this cannot happen in the agent setting. |
+| M1 | Took a different whole version | Each side differs from base, ignoring whitespace and comments. The developer region equals one version (left, right or base) and the resolution another, again ignoring whitespace and comments. |
 | M5 | Order only | Same statements, in a different order. |
-| M4 | Rewrote | The resolution has code that neither side has. |
+| M4 | Rewrote | The resolution has code that none of the three versions has anywhere in the file: new types, calls or statements. Joining two edits of a line that both sides changed, and the glue such a join needs (say, a `return` when one side's new body meets the other side's new return type), does not count. Carrying one side's change into code that only the other side added does. |
 | M3 | Lost a change | A change the developer kept is missing. |
 | M2 | Kept both sides; the developer kept one | The resolution has everything the developer region has, plus a change the developer dropped, usually the other side's. Mostly the textbook three-way merge of two changes that do not overlap. |
-| M6 | Over-scoped output | Single-shot only: the returned resolution includes code from outside the block. The agent edits the block in place, so this cannot happen in the agent setting. |
 
 **Labels of the 52 agent misses.**
 
@@ -443,27 +523,28 @@ Precedence runs from top to bottom; the first class that applies is the label.
     developer kept left only.
   - Why the developer dropped one side is not in this file, so neither setting can know it. This is
     where the one-file limitation shows most.
-- **M1 (9)** is mostly a one-line setting or modifier, such as Matisse's MIME type or caffeine's
-  `protected`. Both versions are plausible, and nothing in the file decides between them.
+- **M1 (9)** are choices between two plausible versions that nothing in the file decides, often a
+  one-line setting or modifier such as Matisse's MIME type or caffeine's `protected`.
 - **Rewrites, losses and reorderings are few:** M3 4, M4 2, M5 2.
-  - In `jedis@b013a74c` (M4), right deleted `disconnect()` and gave the class a new parent. The
-    agent kept the method but rewrote every line of it for the new parent. The developer kept
-    left's version unchanged.
+  - In `jedis@b013a74c` (M4, GPT-5.4), right deleted `disconnect()` and gave the class a new
+    parent. The agent kept the method but rewrote 4 of its 6 lines for the new parent. The developer
+    kept left's version unchanged. (Gemini's agent was accepted here.)
   - In `HikariCP@68a52f14` (M5), the resolution has the same statements as the developer's. The
     developer had moved one side's block ahead of the other's.
 - **Misses unique to one setting** (all 67 scenarios):
-  - Single-shot only (10): M3 7, M1 2, M6 1. The lost changes are small edits on one side, such as
-    graphhopper's `"CAR"` → `"car"`.
-  - Agent only (9): 3 on the evaluation side, then M2 3, M1 1, M3 1, M4 1.
-  - So the agent lost fewer small changes and more often kept both sides. This is a direction only;
-    the paired comparison above is not significant.
+  - Missed only by the single-shot rerun (10): M3 7, M1 2, M6 1. The lost changes are small edits
+    on one side, such as graphhopper's `"CAR"` → `"car"`.
+  - Missed only by the agent (9): 3 on the evaluation side, then M2 3, M1 1, M3 1, M4 1.
+  - So the agent lost fewer small changes and more often kept both sides. This is a direction only:
+    the class counts were not tested, and the paired accept/reject comparison above is not
+    significant.
 - **Process signals against outcome.** Each model has one signal that varies (all 67 scenarios
   per model, primary convention):
 
   | Signal | Accepted with the signal | Accepted without it | Fisher exact p |
   |---|---|---|---|
   | GPT-5.4 searched the files (`grep` or `diff`): 18 of 67 | 13/18 = 72% | 26/49 = 53% | 0.18 |
-  | Gemini probed the environment (`find`, `ls`, `git`, absolute paths): 20 of 67 | 11/20 = 55% | 32/47 = 68% | 0.40 |
+  | Gemini probed the environment (`find`, `ls`, `git`, `stat`, `which`, `pwd`, `tree`, `env`, `diff -r`, `cat /…`, `/opt`, `/etc`): 20 of 67 | 11/20 = 55% | 32/47 = 68% | 0.40 |
 
   - Neither difference is significant.
   - The other signals barely vary. Gemini searched in 66 of 67 samples; GPT probed in none.
@@ -481,8 +562,9 @@ Precedence runs from top to bottom; the first class that applies is the label.
   file (not observed).
 
 **Agreement.** The labels were assigned from the cards by Claude Code, the coding agent used to
-build this harness. The repository author independently labeled 15 misses, drawn at random with a
-fixed seed, in two rounds. All figures are raw agreement on the author's first labels; with n = 15,
+build this harness. The repository author independently labeled 15 misses in two rounds. They were drawn with
+`random.Random(20261010).sample` from the 52 misses sorted by (model, scenario), before any
+discussion; `verify_numbers.py` checks that the draw reproduces. All figures are raw agreement on the author's first labels; with n = 15,
 no kappa is reported.
 
 - **Round 1** (items 1–8, first codebook): 3/8.
@@ -543,8 +625,8 @@ cp outputs/deepeval/unified_stage3_full.jsonl results/stage3_unified_eval_202610
 python scripts/verify_numbers.py
 ```
 
-The failure labels in `results/stage3_failure_labels_20261012.csv` were assigned by hand from the
-cards (see [Failure analysis](#failure-analysis)); there is no command that regenerates them.
+The failure labels in `results/stage3_failure_labels_20261012.csv` were assigned by Claude Code
+from the cards (see [Failure analysis](#failure-analysis)); no script regenerates them.
 `verify_numbers.py` checks that they cover exactly the agent misses and the single-shot-only misses
 of the frozen scoring file, and recomputes the counts and the agreement from them.
 
@@ -591,9 +673,9 @@ of the frozen scoring file, and recomputes the counts and the agreement from the
 - **Single-shot cost is an estimate** (see above).
 - **Possible contamination.** These are public repositories. The models may have seen the upstream
   merge.
-- **The prompt was tuned once on a trial of 10 of the 67 scenarios.** The two added notes are
-  generic (the sandbox has only four files; the step budget), but those 10 scenarios are also
-  scored.
+- **The prompt and limits were tuned once on a trial of 10 of the 67 scenarios**, then checked by a
+  second trial on the same 10. The two added notes are generic (the sandbox has only four files;
+  the step budget), but those 10 scenarios are also scored.
 - **The judge** is the Dataset A judge: precision 100%, recall 64.6% on the five tools'
   resolutions (n = 292). It is strict, so accepted rates are conservative, and its precision on LLM
   resolutions is not measured directly ([RESULTS.md](RESULTS.md)).
