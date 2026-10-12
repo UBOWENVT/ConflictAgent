@@ -36,7 +36,9 @@ Current as of the 2026-07 DeepEval + pipeline-hardening iteration, plus the 2026
   rerun of the pipeline are comparable: lower provider 53.1% vs 46.9%, with no significant
   per-scenario difference for either model. (The rerun's GPT rate is below June's 55.1% through
   run-to-run variation, also not significant.) The agent made about 4–10 times as many model
-  calls.
+  calls. A failure analysis of the 52 agent misses finds 14 on the evaluation side (equivalent
+  resolutions judged wrong, deletions that were not judged, or no matchable reference); the largest class of real differences is
+  keeping both sides' changes where the developer kept one.
 
 The judge and solver figures above can be recomputed from the frozen results in `results/` with no
 API key: `python scripts/verify_numbers.py`. The tool comparison additionally needs the public

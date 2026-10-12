@@ -1,0 +1,63 @@
+setting,provider,id,valid_conflict,label,label_v1,block_imports_only,spot_check,spot_check_round,author_label,label_shown_before,note
+agent,gemini,BGARefreshLayout-Android@3d121bab,True,M1,M1,False,,,,,kept left active; applied right's API change inside left's commented-out code. Creative but active behavior = left.
+agent,openai,BGARefreshLayout-Android@3d121bab,True,M1,M1,False,,,,,"dev took right (stickiness API update); model kept left (switch to Mooc holder). Looked at all 4 files + grep, no reasoning about which intent wins."
+agent,gemini,HikariCP@68a52f14,True,M5,M5,False,,,,,"same as GPT: content of both sides right, order reversed vs developer (judge: checkFailFast before executors). Gemini did diff -u of both sides first."
+agent,openai,HikariCP@68a52f14,True,M5,M5,False,8,1,none,True,both sides' content present; right's executors placed before left's metrics/checkFailFast; dev puts left block first. Judge: order functionally significant. Single-shot identical.
+agent,gemini,JustAuth@3199334d,False,M2,M2,True,4,1,none,False,same as GPT (import order differs). Single-shot identical.
+agent,openai,JustAuth@3199334d,False,M2,M2,True,,,,,FALSE conflict. Model took left's new import + right's package move (enums.AuthResponseStatus); developer kept left only (model.AuthResponseStatus). Model's merge is the textbook combination; developer dropped right's rename.
+agent,gemini,Matisse@93d0051c,True,M1,M1,False,,,,,"1-line config: left .choose(ofImage(), false) vs right .choose(of(GIF), true); dev=left, model=right. Gemini argued GifSizeFilter in file. Explored env (find, ls, git log) despite prompt; ran check_java before editing. 20 calls. Single-shot Gemini picked left = accepted."
+agent,openai,Matisse@93d0051c,True,M1,M1,False,,,,,"same, right. 4 calls."
+agent,gemini,XChange@16f86f72,True,M2,M2,True,,,,,import conflict: both added one import; model kept both; dev kept right only. Extra import harmless (judge strict?). multi-block.
+agent,openai,XChange@16f86f72,True,M2,M2,True,,,,,same.
+agent,openai,apollo@c46f561c,True,M3,M3,False,,,,,"dev combined left's ""6666"" string arg + right's ConfigConsts rename; model kept left only, missed right's rename. Single-shot combined correctly (accepted). 4 calls, no search."
+agent,openai,azkaban@4816d743,True,M2,M2,True,,,,,"import conflict; model kept both (claims both used, grepped); dev kept left only. multi-block (3)."
+agent,gemini,caffeine@7a5b3f11,True,M1,M1,False,,,,,"both sides added the same field: left `int step =1;` right `protected int step = 1;`; dev=left, model=right. Near-equivalent; visibility differs. multi-block."
+agent,openai,caffeine@7a5b3f11,True,M1,M1,False,,,,,same.
+agent,gemini,cat@1bd24982,False,M2,M2,False,,,,,"FALSE conflict. left added `case NETTOPOLOGY`, right changed a return to AGGREGATION; model applied both (textbook 3-way merge); dev kept left only (dropped right's change). 1 replace_text whitespace error, recovered."
+agent,openai,cat@1bd24982,False,M2,M2,False,,,,,same.
+agent,gemini,elasticsearch-analysis-ik@ca2bfe57,True,M2,M2,False,,,,,"left added `final`, right only re-indented (tab). Model kept `final` with right's indentation (textbook merge); dev took right = dropped `final`."
+agent,openai,elasticsearch-analysis-ik@ca2bfe57,True,M2,M2,False,,,,,"same (kept left's final). 2 replace_text whitespace errors, then printed repr of lines, recovered."
+agent,gemini,frontend-maven-plugin@d543d86d,False,M4,M4,False,,,,,"FALSE conflict. left added getJspmRunner(defaultPlatform, workingDirectory); right refactored Bower runner to getExecutorConfig(). Model also rewrote left's new Jspm runner to getExecutorConfig() (propagated refactor); dev left it as is. find for JspmRunner found nothing, so constructor existence unverifiable."
+agent,openai,graphql-java@4cfd6281,True,E1,E1,False,,,,,"javadoc ` * </p>` (left, dev) vs ` * <p>` (right, model). Comment-only; judge step 4 says disregard comments, judged 0.0 anyway. Also other_side."
+agent,openai,greys-anatomy@025cc5ca,True,E1,E1,False,,,,,"right commented out a throw; left renamed configer->configure. Dev: commented-out throw w/ left's rename. Model: replaced with an explanatory comment, no throw. Behavior identical; only comment text differs; judge 0.0."
+agent,gemini,h2o-2@324cfbda,True,M2,M2,False,,,,,"left: Assert.assertTrue(old logic); right: bare assert(new logic, 0.20). Model: Assert.assertTrue(right's logic); dev: right exactly. Real difference (assert needs -ea). Gemini ran stat, find, repeated diffs."
+agent,openai,h2o-2@324cfbda,True,M2,M2,False,,,,,same as Gemini. Single-shot GPT took right exactly = accepted.
+agent,gemini,hazelcast@c56868c1,True,E1,E1,True,14,2,E1,False,"left: wildcard core.*; right: adds lock.* keeps explicit core imports. Model: lock.* + core.* ; dev: right. Judge itself says functionally equivalent, still rejects (step 4 says disregard equivalent import sets)."
+agent,openai,hazelcast@c56868c1,True,E1,E1,True,,,,,same.
+agent,gemini,jadx@c705f8cb,True,M2,M2,False,13,2,M2,False,left removed the unreachable-block check loop (refactor); right added mergeExceptionHandlers. Model: right's addition + left's removal (textbook merge); dev: right whole (kept the check).
+agent,gemini,java-jwt@41e4ff43,True,M3,M3,True,,,,,left: switched Date to java.sql.Date (+Instant); right: java.util.* wildcard. Model kept Instant + java.util.* but dropped java.sql.Date -> `Date` now resolves to java.util.Date: real semantic loss. multi-block so (2) only marker check.
+agent,openai,java-jwt@41e4ff43,True,M3,M3,True,,,,,"model wrote `import org.mockito.Mockito;` + `java.util.*`, dropped java.sql.Date and java.time.Instant (left's changes); Mockito import not in the block. 4 calls, no search."
+agent,openai,jd-gui@2ae4688e,True,M3,M3,False,,,,,"left added .kar (kept .jmod); right removed .jmod. Dev = textbook merge (no .jmod, + .kar). Model = left = dropped right's removal of .jmod. Single-shot same."
+agent,openai,jedis@b013a74c,True,M4,M4,False,12,2,M2,True,"left modified disconnect(); right deleted disconnect()+create(). Dev kept left. Model rewrote disconnect with different types (Jedis vs JedisShardInfo), no throws -- ""adapted to BinaryShardedJedis"". Invented code beyond both sides. Single-shot took left = accepted."
+agent,gemini,jjwt@3f079803,True,E2,E2,False,,,,,"took left's deletion of a Javadoc paragraph; dev kept right's fixed paragraph. Comment-only, behavior identical; never judged (empty)."
+agent,openai,jjwt@3f079803,True,E1,E1,False,,,,,"block is entirely Javadoc. left deleted paragraph, right fixed a quote. Model inserted left's new compatibility-note text (probably duplicating it). Behavior identical; judge 0.0."
+agent,gemini,lanproxy@1e0cfe75,True,E2,E2,True,2,1,E2,False,left deleted explicit netty imports (prefix already has io.netty.channel.* and Unpooled); model took left (deletion); dev took right. Equivalent import set; never judged. Ran check_java before editing.
+agent,openai,lanproxy@1e0cfe75,True,E1,E1,True,3,1,M3,False,"model kept right's imports minus Unpooled, which is already imported in the prefix. Judge rejects for ""missing Unpooled"". Equivalent."
+agent,gemini,light-task-scheduler@c96cd543,False,M2,M2,False,,,,,"FALSE conflict. left: monitor port 9090; right: netty remoting + comment. Model: both (textbook); dev: right only (dropped left's port change). Many env probes (diff -r, grep -rn)."
+agent,openai,light-task-scheduler@c96cd543,False,M2,M2,False,,,,,same.
+agent,gemini,mockserver@5e06a30f,False,M1,M2,True,6,1,M1,False,"FALSE conflict. Both sides added KeyStoreFactory import; left removed SSLFactory. Model = right (both imports); dev = base (SSLFactory only, discarded the import both sides added)."
+agent,openai,mockserver@5e06a30f,False,M1,M2,True,15,2,M2,False,same.
+agent,gemini,mybatis-3@3502f7ce,False,M2,M2,True,,,,,FALSE conflict. left added AssertJ import; right switched Test import to jupiter. Model both (textbook); dev right only.
+agent,openai,mybatis-3@3502f7ce,False,M2,M2,True,,,,,same.
+agent,openai,nanohttpd@d4b12671,True,M1,M1,False,5,1,M1,False,left removed two fields (keeps only QUERY_STRING_PARAMETER); right documented the two fields and added the same constant. Dev = left (fields removed); model = right (kept fields). 992-line file.
+agent,gemini,openapi-generator@bade71c6,True,E3,E3,False,,,,,@Generated timestamp; developer's date matches no side (regenerated). No resolution from the given files can match.
+agent,openai,openapi-generator@bade71c6,True,E3,E3,False,11,2,none,True,same.
+agent,gemini,presto@f50b46c7,True,E3,E3,False,,,,,"dev region contains unresolved markers (2nd conflict); judge says expected is unresolved. check_java false positive (duplicate overloads outside block) -> Gemini tried 27 calls, then `find /` for the checker, read /opt/harness/check_java.py and validate.py (view_file accepts absolute paths), hit token limit. Only sample (1/134) that read the checker source."
+agent,openai,presto@f50b46c7,True,E3,E3,False,,,,,"wrote full resolution, check_java false positive, deleted the whole block, check still failed, submitted anyway with a wrong rationale. empty."
+agent,openai,simplify@f1f39138,True,M2,M2,False,,,,,left replaced cache block with a local-class guard; right rewrote caching. Model: left guard + right caching; dev: left only. Single-shot took left = accepted.
+agent,gemini,spark@24e7b265,False,M2,M2,False,9,2,M2,False,"FALSE conflict. left: void halt() delegates getInstance().halt(); right: return type HaltException. Model: `HaltException halt() { return getInstance().halt();` -- combination likely does not compile if getInstance().halt() is void (multi-block, so (2) only checks markers). Dev = left. Ran check_java before editing; find . -type f."
+agent,gemini,spring-petclinic@89d0e244,True,M2,M2,True,7,1,none,False,imports: model = left + right's ContextConfiguration; dev = left. Ran `git status` despite prompt. Single-shot = left = accepted.
+agent,gemini,springfox@06591ff0,True,M2,M2,True,1,1,M2,False,imports: left added 2 classmate imports; right listed static/java.util/Mapper imports. Model = union; dev = left.
+agent,openai,springfox@06591ff0,True,M2,M2,True,,,,,same.
+agent,gemini,thumbnailator@56dee622,True,E1,E1,False,,,,,"Javadoc `@since<TAB>0.3.4` (left, dev) vs `@since 0.3.4` (right, model). Whitespace inside a comment; judge 0.3 rejects (step 4 says disregard whitespace and comments)."
+agent,openai,thumbnailator@56dee622,True,E1,E1,False,10,2,E1,True,"same; judge even says ""may appear superficial""."
+single_shot,openai,AmazeFileManager@4ee2cdaf,True,M3,M3,False,,,,,"left changed ""OTG""->""otg:/""; right only re-spaced; single-shot took right = lost left's change"
+single_shot,openai,ByteTCC@5fcab99b,True,M3,M3,False,,,,,dropped left's two removeTransaction lines; added a stray brace
+single_shot,gemini,JCTools@e5feff2a,True,M1,M1,True,,,,,single-shot = left; dev = right
+single_shot,openai,JCTools@e5feff2a,True,M1,M1,True,,,,,single-shot = left (1 import); dev = right (10 imports)
+single_shot,openai,Mycat-Server@5bc25fa8,True,M3,M3,False,,,,,kept `private Procedure procedure;` that left removed and dev removed
+single_shot,openai,ansj_seg@2eb46b3c,True,M3,M3,False,,,,,AnsjUtils (left) + crfModel (right); dev = right; lost right's IOUtil
+single_shot,openai,flowable-engine@ac0533b5,False,M3,M3,False,,,,,FALSE. lost left's addProblem(intermediateEvent) argument change
+single_shot,openai,graphhopper@ef755119,True,M3,M3,False,,,,,"lost right's ""CAR""->""car"""
+single_shot,openai,traccar@8a696af4,True,M3,M3,False,,,,,"dev combined KEY_LANGUAGE (left) + no braces (right); single-shot = left, lost brace removal"
+single_shot,openai,web3j@943ecbd8,True,M6,M6,False,,,,,"output included the whole method beyond the block, kept throws; does not parse; 4 rounds"

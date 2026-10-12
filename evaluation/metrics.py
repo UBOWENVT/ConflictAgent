@@ -63,7 +63,8 @@ def resolution_acceptability_metric(threshold: float = 0.5, model: object | None
                                     evaluation_steps: list[str] | None = None) -> GEval:
     """The ① semantic judge as a DeepEval GEval metric.
 
-    test_case fields used: input = the conflict (diff3 + window); actual_output = candidate
+    test_case fields used: input = the conflict block alone (diff3; none of the file around it, so
+    imports outside the block are not visible to the judge); actual_output = candidate
     resolution; expected_output = developer resolution. Score is GEval's 0-1; threshold maps to
     a binary accept/reject so results align with the binary human labels.
 

@@ -2,6 +2,7 @@
 
     python -m harness.analyze logs/2026-*.eval [--csv metrics.csv] [--dump transcripts/]
     python -m harness.analyze --single-shot outputs/eval/runs/eval_A_....jsonl [--csv rounds.csv]
+    python -m harness.analyze logs/2026-*.eval --signals --csv signals.csv
 
 Costs are tokens x list price (PRICES, USD per 1M tokens), computed after the fact: Inspect has
 no price data for these models, so cost_limit is not used during runs (token_limit is).
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import statistics
 import sys
 from collections import Counter
@@ -91,6 +93,28 @@ def sample_metrics(model: str, sample: EvalSample) -> dict:
     }
 
 
+
+# Process signals for the failure analysis (docs/HARNESS.md), read off the tool calls.
+SEARCH = re.compile(r"\bgrep\b|\bdiff\b")
+PROBE = re.compile(r"(^|[;&|]\s*|\s)(find|ls|git|stat|which|pwd|tree)\b|diff -r|cat /|/opt|/etc|env\b")
+CHECKER_DIR = "/opt/harness"
+
+
+def process_signals(model: str, sample: EvalSample) -> dict:
+    """Yes/no signals of how one sample went about the task, to cross with its outcome."""
+    calls = _tool_calls(sample)
+    names = [f for f, _ in calls]
+    bash = [a.get("command", "") for f, a in calls if f == "bash"]
+    first = lambda t: names.index(t) if t in names else len(names)  # noqa: E731
+    return {
+        "model": model, "id": sample.metadata["scenario_id"],
+        "searched": any(SEARCH.search(c) for c in bash),           # grep / diff inside the files
+        "probed_environment": any(PROBE.search(c) for c in bash),  # find, ls, git, /opt, ...
+        "checked_before_editing": first("check_java") < first("replace_text"),
+        "read_checker_source": any(CHECKER_DIR in json.dumps(a) for f, a in calls
+                                   if f in ("bash", "view_file")),
+    }
+
 def _clip(text: str, n: int) -> str:
     text = text.strip()
     return text if len(text) <= n else text[:n] + f" ... [{len(text) - n} more chars]"
@@ -123,12 +147,12 @@ def trajectory_text(model: str, sample: EvalSample, clip: int = 1500) -> str:
     return "\n".join(lines) + "\n"
 
 
-def collect(log_paths: list[str], dump_dir: str | None = None) -> list[dict]:
+def collect(log_paths: list[str], dump_dir: str | None = None, signals: bool = False) -> list[dict]:
     rows = []
     for p in log_paths:
         lg = read_eval_log(p)
         for s in lg.samples or []:
-            rows.append(sample_metrics(lg.eval.model, s))
+            rows.append((process_signals if signals else sample_metrics)(lg.eval.model, s))
             if dump_dir:
                 d = Path(dump_dir) / lg.eval.model.replace("/", "_")
                 d.mkdir(parents=True, exist_ok=True)
@@ -225,6 +249,8 @@ def main() -> None:
     ap.add_argument("--dump", default=None, help="write one readable transcript per sample here")
     ap.add_argument("--single-shot", default=None, metavar="RUN_JSONL",
                     help="estimate the token cost of a scripts/run_eval.py run instead")
+    ap.add_argument("--signals", action="store_true",
+                    help="write the per-sample process signals (needs --csv) instead of the metrics")
     args = ap.parse_args()
     if args.single_shot:
         print(single_shot_estimate(args.single_shot))
@@ -233,6 +259,14 @@ def main() -> None:
         return
     if not args.logs:
         ap.error("give Inspect logs, or --single-shot RUN_JSONL")
+    if args.signals:
+        if not args.csv:
+            ap.error("--signals needs --csv")
+        rows = collect(args.logs, signals=True)
+        for k in ("searched", "probed_environment", "checked_before_editing", "read_checker_source"):
+            print(k, dict(Counter((r["model"], r[k]) for r in rows if r[k])))
+        _write_csv(args.csv, rows)
+        return
     rows = collect(args.logs, args.dump)
     print(summarize(rows))
     if args.csv:

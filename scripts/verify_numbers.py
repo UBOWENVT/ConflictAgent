@@ -1,7 +1,8 @@
 """Recompute the reported ConflictAgent numbers from the frozen results in results/.
 
-The stage-3 figures (the agent setting, docs/HARNESS.md) are recomputed from the three
-results/stage3_* files the same way.
+The stage-3 figures (the agent setting, docs/HARNESS.md) are recomputed from the
+results/stage3_* files the same way, including the failure analysis: its label counts, the
+spot-check agreement and the process cross-tabs.
 
 No API key, no LLM calls, standard library only:
 
@@ -54,12 +55,16 @@ SHA256 = {  # the frozen files as committed; a mismatch means they were changed 
     "stage3_unified_eval_20261010_163404.jsonl": "b7b1627e22034d65ede98b868219c84cf4d3d1dad401498eae62165c1e94e64c",
     "stage3_agent_metrics_20261010.csv": "8429d67e1ba346309438b7c5ff430bf9ee071cd90bb42d08d93183146e066c55",
     "stage3_single_shot_20261010.csv": "e93e6100a14996080bb102ca5f5c65f6d15a44def56845315d58343e732b89cc",
+    "stage3_failure_labels_20261012.csv": "745167841b1125761331b9573fad205f03bc1443e6c1b68f9050e474f938d474",
+    "stage3_process_signals_20261012.csv": "d80220f93051d78899b77f9021d71275b7728798a1c76a4b02820e99eacb90af",
 }
 
 # Stage 3: the agent setting (docs/HARNESS.md "Results").
 S3_UNIFIED = ROOT / "results" / "stage3_unified_eval_20261010_163404.jsonl"
 S3_AGENT = ROOT / "results" / "stage3_agent_metrics_20261010.csv"
 S3_SINGLE = ROOT / "results" / "stage3_single_shot_20261010.csv"
+S3_LABELS = ROOT / "results" / "stage3_failure_labels_20261012.csv"
+S3_SIGNALS = ROOT / "results" / "stage3_process_signals_20261012.csv"
 PRESTO = "presto@f50b46c7"
 N_TYPE = {True: 49, False: 18}
 # Secondary convention per outcome; must equal harness/scorers.py OUTCOME_RULES (a test checks it).
@@ -115,6 +120,25 @@ EXPECTED_STAGE3 = {
     "s3 agent cost: openai / gemini / total": "$2.36 / $3.79 / $6.15",
     "s3 single-shot cost estimate: openai / gemini": "$0.85 / $0.20",
     "s3 gate: not extractable / out of block / limits hit": "0/134 / 0/134 / 1/134",
+}
+# Failure analysis (docs/HARNESS.md "Failure analysis"); codes in the codebook's precedence order.
+CODES = ("E3", "E2", "E1", "M1", "M5", "M4", "M3", "M2")
+EXPECTED_FAILURES = {
+    "s3 failures: agent misses openai / gemini / total": "28 / 24 / 52",
+    "s3 failures E3/E2/E1/M1/M5/M4/M3/M2: openai": "2 / 0 / 6 / 5 / 1 / 1 / 3 / 10",
+    "s3 failures E3/E2/E1/M1/M5/M4/M3/M2: gemini": "2 / 2 / 2 / 4 / 1 / 1 / 1 / 11",
+    "s3 failures E3/E2/E1/M1/M5/M4/M3/M2: total": "4 / 2 / 8 / 9 / 2 / 2 / 4 / 21",
+    "s3 failures: evaluation side (E)": "14/52",
+    "s3 failures: E1 also missed by single-shot": "8/8",
+    "s3 failures: M2 on import-only blocks": "10 of 21",
+    "s3 failures: false conflicts M2 / M1 / M4": "9 / 2 / 1 of 12",
+    "s3 failures: single-shot only M3 / M1 / M6": "7 / 2 / 1 of 10",
+    "s3 failures: agent only E / M2 / M1 / M3 / M4": "3 / 3 / 1 / 1 / 1 of 9",
+    "s3 spot check: round 1 / round 2 / round 2 unseen / all": "3/8 / 4/7 / 3/4 / 7/15",
+    "s3 signals: openai searched, accepted yes / no, Fisher p": "13/18 = 72% / 26/49 = 53%, p = 0.18",
+    "s3 signals: gemini probed, accepted yes / no, Fisher p": "11/20 = 55% / 32/47 = 68%, p = 0.40",
+    "s3 signals: gemini checked before editing / read checker source": "6/67 / 1/67",
+    "s3 signals: searched openai / gemini; probed openai / gemini": "18/67 / 66/67; 0/67 / 20/67",
 }
 
 
@@ -179,6 +203,91 @@ def _pct(k: int, n: int) -> str:
 def _csv(path: Path) -> list[dict]:
     with path.open(encoding="utf-8", newline="") as fh:
         return list(csv.DictReader(fh))
+
+
+def _fisher(a: int, b: int, c: int, d: int) -> float:
+    """Two-sided Fisher exact test on [[a, b], [c, d]]: tables as or less likely than this one."""
+    n, row, col = a + b + c + d, a + b, a + c
+    prob = lambda x: comb(col, x) * comb(n - col, row - x) / comb(n, row)  # noqa: E731
+    observed = prob(a)
+    return min(1.0, sum(prob(x) for x in range(max(0, row + col - n), min(row, col) + 1)
+                        if prob(x) <= observed * (1 + 1e-7)))
+
+
+def _hits(v: list[dict]) -> dict[tuple[str, str, str], bool]:
+    return {(r["group"], r["id"], r["provider"]): r["outcome"] == "gradeable" and r.get("accept") is True
+            for r in v}
+
+
+def _discordant(v: list[dict]) -> tuple[set, set]:
+    """(id, provider) pairs missed by the agent only, and by the single-shot rerun only (all 67)."""
+    hit = _hits(v)
+    keys = {(r["id"], r["provider"]) for r in v}
+    agent_only = {k for k in keys if not hit[("agent", *k)] and hit[("single_shot", *k)]}
+    single_only = {k for k in keys if hit[("agent", *k)] and not hit[("single_shot", *k)]}
+    return agent_only, single_only
+
+
+def recompute_failures() -> dict[str, str]:
+    got: dict[str, str] = {}
+    v = [r for r in _load(S3_UNIFIED) if r["kind"] == "verdict"]
+    hit = _hits(v)
+    labels = _csv(S3_LABELS)
+    agent = [r for r in labels if r["setting"] == "agent"]
+    single = [r for r in labels if r["setting"] == "single_shot"]
+    per = {p: Counter(r["label"] for r in agent if r["provider"] == p) for p in ("openai", "gemini")}
+    total = per["openai"] + per["gemini"]
+    got["s3 failures: agent misses openai / gemini / total"] = (
+        f"{sum(per['openai'].values())} / {sum(per['gemini'].values())} / {len(agent)}")
+    for name, c in (("openai", per["openai"]), ("gemini", per["gemini"]), ("total", total)):
+        got[f"s3 failures E3/E2/E1/M1/M5/M4/M3/M2: {name}"] = " / ".join(str(c[k]) for k in CODES)
+    got["s3 failures: evaluation side (E)"] = (
+        f"{sum(r['label'].startswith('E') for r in agent)}/{len(agent)}")
+    e1 = [r for r in agent if r["label"] == "E1"]
+    got["s3 failures: E1 also missed by single-shot"] = (
+        f"{sum(not hit[('single_shot', r['id'], r['provider'])] for r in e1)}/{len(e1)}")
+    m2 = [r for r in agent if r["label"] == "M2"]
+    got["s3 failures: M2 on import-only blocks"] = (
+        f"{sum(r['block_imports_only'] == 'True' for r in m2)} of {len(m2)}")
+    false = Counter(r["label"] for r in agent if r["valid_conflict"] == "False")
+    got["s3 failures: false conflicts M2 / M1 / M4"] = (
+        f"{false['M2']} / {false['M1']} / {false['M4']} of {sum(false.values())}")
+    s = Counter(r["label"] for r in single)
+    got["s3 failures: single-shot only M3 / M1 / M6"] = f"{s['M3']} / {s['M1']} / {s['M6']} of {len(single)}"
+    agent_only, _ = _discordant(v)
+    ao = Counter(r["label"][0] if r["label"].startswith("E") else r["label"]
+                 for r in agent if (r["id"], r["provider"]) in agent_only)
+    got["s3 failures: agent only E / M2 / M1 / M3 / M4"] = (
+        f"{ao['E']} / {ao['M2']} / {ao['M1']} / {ao['M3']} / {ao['M4']} of {len(agent_only)}")
+
+    spot = [r for r in agent if r["spot_check"]]
+    agree = lambda rs, col: sum(r["author_label"] == r[col] for r in rs)  # noqa: E731
+    r1 = [r for r in spot if r["spot_check_round"] == "1"]  # first round: codebook v1
+    r2 = [r for r in spot if r["spot_check_round"] == "2"]
+    unseen = [r for r in r2 if r["label_shown_before"] == "False"]
+    got["s3 spot check: round 1 / round 2 / round 2 unseen / all"] = (
+        f"{agree(r1, 'label_v1')}/{len(r1)} / {agree(r2, 'label')}/{len(r2)} / "
+        f"{agree(unseen, 'label')}/{len(unseen)} / {agree(r1, 'label_v1') + agree(r2, 'label')}/{len(spot)}")
+
+    sig = _csv(S3_SIGNALS)
+    prov = {m: p for p, m in AGENT_MODEL.items()}
+    for p, k, name in (("openai", "searched", "searched"), ("gemini", "probed_environment", "probed")):
+        rs = [r for r in sig if prov[r["model"]] == p]
+        yes = [hit[("agent", r["id"], p)] for r in rs if r[k] == "True"]
+        no = [hit[("agent", r["id"], p)] for r in rs if r[k] != "True"]
+        a, c = sum(yes), sum(no)
+        got[f"s3 signals: {p} {name}, accepted yes / no, Fisher p"] = (
+            f"{a}/{len(yes)} = {a / len(yes):.0%} / {c}/{len(no)} = {c / len(no):.0%}, "
+            f"p = {_pfmt(_fisher(a, len(yes) - a, c, len(no) - c))}")
+    n = lambda p, k: f"{sum(r[k] == 'True' for r in sig if prov[r['model']] == p)}/67"  # noqa: E731
+    got["s3 signals: searched openai / gemini; probed openai / gemini"] = (
+        f"{n('openai', 'searched')} / {n('gemini', 'searched')}; "
+        f"{n('openai', 'probed_environment')} / {n('gemini', 'probed_environment')}")
+    g = [r for r in sig if prov[r["model"]] == "gemini"]
+    got["s3 signals: gemini checked before editing / read checker source"] = (
+        f"{sum(r['checked_before_editing'] == 'True' for r in g)}/{len(g)} / "
+        f"{sum(r['read_checker_source'] == 'True' for r in g)}/{len(g)}")
+    return got
 
 
 def recompute_stage3() -> dict[str, str]:
@@ -314,6 +423,20 @@ def integrity_problems() -> list[str]:
     unjudged = [r for r in v if not r["judged"] and r["outcome"] == "gradeable"]
     if unjudged:
         problems.append(f"{S3_UNIFIED.name}: {len(unjudged)} gradeable rows without a verdict")
+    # the failure labels must cover exactly the agent misses and the single-shot-only misses
+    hit = _hits(v)
+    labels = _csv(S3_LABELS)
+    misses = {(r["id"], r["provider"]) for r in v if r["group"] == "agent" and not hit[("agent", r["id"], r["provider"])]}
+    _, single_only = _discordant(v)
+    for setting, want in (("agent", misses), ("single_shot", single_only)):
+        have = [(r["id"], r["provider"]) for r in labels if r["setting"] == setting]
+        if len(have) != len(set(have)) or set(have) != want:
+            problems.append(f"{S3_LABELS.name}: {setting} rows do not match the {setting} misses")
+    bad = [r for r in labels if r["label"] not in CODES + ("M6",)]
+    if bad:
+        problems.append(f"{S3_LABELS.name}: {len(bad)} rows with an unknown code")
+    if len({(r["model"], r["id"]) for r in _csv(S3_SIGNALS)}) != 134:
+        problems.append(f"{S3_SIGNALS.name}: expected 134 distinct samples")
     return problems
 
 
@@ -323,7 +446,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     problems = integrity_problems()
-    for path in (JUDGE_FILE, SOLVER_FILE, S3_UNIFIED, S3_AGENT, S3_SINGLE):
+    for path in (JUDGE_FILE, SOLVER_FILE, S3_UNIFIED, S3_AGENT, S3_SINGLE, S3_LABELS, S3_SIGNALS):
         digest = sha256(path)
         print(f"{path.relative_to(ROOT)}  sha256 {digest[:16]}")
         if digest != SHA256[path.name]:
@@ -331,8 +454,8 @@ def main() -> int:
     for p in problems:
         print(f"INTEGRITY: {p}")
     print()
-    got = {**recompute(), **recompute_stage3()}
-    expected = {**EXPECTED, **EXPECTED_STAGE3}
+    got = {**recompute(), **recompute_stage3(), **recompute_failures()}
+    expected = {**EXPECTED, **EXPECTED_STAGE3, **EXPECTED_FAILURES}
     width = max(len(k) for k in expected)
     bad = 0
     print(f"{'figure':<{width}}  {'recomputed':<20}  {'reported':<20}")

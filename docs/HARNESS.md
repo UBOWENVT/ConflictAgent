@@ -16,7 +16,8 @@ the number of turns, the prompt, and the output format (an edited file instead o
 snippet). Results therefore compare the two *settings*. A claim about one tool would need an
 ablation.
 
-> Status: one full scored run, 2026-10-10. Results and limitations are at the end of this page.
+> Status: one full scored run, 2026-10-10. Results, the failure analysis and the limitations are
+> at the end of this page.
 
 ## Layout
 
@@ -28,7 +29,7 @@ harness/
   scorers.py       deterministic scoring of the final file (no LLM judge)
   prompts.py       agent instructions
   export.py        Inspect logs -> run_eval.py-schema JSONL for the offline judge
-  analyze.py       per-sample process metrics and token cost
+  analyze.py       per-sample process metrics, process signals and token cost
   sandbox/         Dockerfile, compose.yaml, check_java.py (+ a byte-identical validate.py)
 evaluation/run_unified_eval.py   one judge instance over several groups of resolutions
 tests/harness/                   unit, mock end-to-end (local and Docker) tests
@@ -375,6 +376,132 @@ The 3 `empty` outcomes:
   block. The check failed again with the same message, and the model submitted anyway, saying that
   the file already contained the same methods elsewhere.
 
+### Failure analysis
+
+**Scope.** Two sets of misses, under the primary convention:
+- all 52 agent samples that missed (GPT-5.4 28, Gemini 24);
+- the 10 (scenario, model) pairs that only the single-shot rerun missed.
+
+**Method.**
+- Each miss got a card: the target block, the developer region, the resolution, the judge's reason
+  and the agent's steps.
+- The classes were formed after reading all the cards. The plan's checklist of guessed failure
+  modes served only as a cross-check.
+
+**Codebook.** The classes describe how a resolution differs from the developer's. They do not say
+which of the two is right: the developer's resolution is one acceptable answer, not the only one.
+
+- A *change* is what one side did relative to base: a line added, removed or edited.
+- **E** is the evaluation side: the resolution is equivalent to the developer's, or cannot be
+  compared with it.
+- **M** is a real difference in code. It may be the model's mistake, or the developer's choice.
+
+Precedence runs from top to bottom; the first class that applies is the label.
+
+| Code | Class | Rule |
+|---|---|---|
+| E3 | No matchable reference | The developer region still contains conflict markers, or uses a value that none of base, left and right has. No resolution could match it. A reference that is only redundant (say, a duplicate import) is not E3. |
+| E2 | Deleted, not judged | The resolution is empty. Empty resolutions are not judged and count as misses (pre-registered). |
+| E1 | Equivalent, judged wrong | The difference is only in comments or whitespace, or the same classes end up imported (a wildcard covers them, or the file imports them outside the block). |
+| M1 | Took a different whole version | Both sides changed the block. The developer region equals one version (left, right or base) and the resolution another, ignoring whitespace and comments. |
+| M5 | Order only | Same statements, in a different order. |
+| M4 | Rewrote | The resolution has code that neither side has. |
+| M3 | Lost a change | A change the developer kept is missing. |
+| M2 | Kept both sides; the developer kept one | The resolution has everything the developer region has, plus a change the developer dropped, usually the other side's. Mostly the textbook three-way merge of two changes that do not overlap. |
+| M6 | Over-scoped output | Single-shot only: the returned resolution includes code from outside the block. The agent edits the block in place, so this cannot happen in the agent setting. |
+
+**Labels of the 52 agent misses.**
+
+| Class | GPT-5.4 | Gemini | Total |
+|---|---|---|---|
+| E3 No matchable reference | 2 | 2 | 4 |
+| E2 Deleted, not judged | 0 | 2 | 2 |
+| E1 Equivalent, judged wrong | 6 | 2 | 8 |
+| M1 Took a different whole version | 5 | 4 | 9 |
+| M5 Order only | 1 | 1 | 2 |
+| M4 Rewrote | 1 | 1 | 2 |
+| M3 Lost a change | 3 | 1 | 4 |
+| M2 Kept both sides; the developer kept one | 10 | 11 | 21 |
+| **Total** | **28** | **24** | **52** |
+
+**Findings.**
+
+- **14 of the 52 misses are on the evaluation side.**
+  - E1 (8). In 7 of them, the judge rejected a difference that its own evaluation step 4 says to
+    disregard: comments, whitespace, or an import set that is visibly equivalent within the block.
+    In the eighth (`lanproxy@1e0cfe75`, GPT), the import the judge found missing is already
+    imported outside the block, and the judge sees only the block (see [Limitations](#limitations)).
+  - Single-shot missed all 8 of these scenarios as well, so they do not bias the comparison. They
+    make the absolute rates conservative. The rates are not adjusted, as pre-registered.
+  - E3 (4): presto in both models (markers in the reference), and `openapi-generator@bade71c6` in
+    both, where the developer's line carries a generated timestamp that is later than both sides'.
+  - E2 (2): the two Gemini deletions described under [Outcomes](#outcomes).
+- **M2 is the largest class: 21 of the 52.**
+  - 10 of the 21 are blocks of imports only, and M2 covers 9 of the 12 misses on false conflicts.
+  - A typical case is `JustAuth@3199334d`, a false conflict. Left adds an import; right moves
+    another class to a new package, on a different line. Both models kept both changes; the
+    developer kept left only.
+  - Why the developer dropped one side is not in this file, so neither setting can know it. This is
+    where the one-file limitation shows most.
+- **M1 (9)** is mostly a one-line setting or modifier, such as Matisse's MIME type or caffeine's
+  `protected`. Both versions are plausible, and nothing in the file decides between them.
+- **Rewrites, losses and reorderings are few:** M3 4, M4 2, M5 2.
+  - In `jedis@b013a74c` (M4), right deleted `disconnect()` and gave the class a new parent. The
+    agent kept the method but rewrote every line of it for the new parent. The developer kept
+    left's version unchanged.
+  - In `HikariCP@68a52f14` (M5), the resolution has the same statements as the developer's. The
+    developer had moved one side's block ahead of the other's.
+- **Misses unique to one setting** (all 67 scenarios):
+  - Single-shot only (10): M3 7, M1 2, M6 1. The lost changes are small edits on one side, such as
+    graphhopper's `"CAR"` → `"car"`.
+  - Agent only (9): 3 on the evaluation side, then M2 3, M1 1, M3 1, M4 1.
+  - So the agent lost fewer small changes and more often kept both sides. This is a direction only;
+    the paired comparison above is not significant.
+- **Process signals against outcome.** Each model has one signal that varies (all 67 scenarios
+  per model, primary convention):
+
+  | Signal | Accepted with the signal | Accepted without it | Fisher exact p |
+  |---|---|---|---|
+  | GPT-5.4 searched the files (`grep` or `diff`): 18 of 67 | 13/18 = 72% | 26/49 = 53% | 0.18 |
+  | Gemini probed the environment (`find`, `ls`, `git`, absolute paths): 20 of 67 | 11/20 = 55% | 32/47 = 68% | 0.40 |
+
+  - Neither difference is significant.
+  - The other signals barely vary. Gemini searched in 66 of 67 samples; GPT probed in none.
+  - The prompt says that the sandbox holds only the four files and no git. Gemini probed anyway,
+    and it ran `check_java` before its first edit in 6 samples.
+  - Every sample ran `check_java` at least once, and no sample submitted without having run it,
+    so that signal has nothing to cross.
+- **One sample read the checker's source.** Gemini on presto had been stopped by the checker's
+  false positive. It searched the whole container with `find /`, then read
+  `/opt/harness/check_java.py` and its `validate.py`.
+  - The checker holds no answers, and scoring happens outside the container.
+  - Still, the harness could run the checker as a different user, so that the model cannot read it.
+- **Checklist items with no evidence** were left out of the codebook: edits outside the block
+  (0/134), submitting without a self-check (0/134), and acting after reading only part of a large
+  file (not observed).
+
+**Agreement.** The labels were assigned from the cards by Claude Code, the coding agent used to
+build this harness. The repository author independently labeled 15 misses, drawn at random with a
+fixed seed, in two rounds. All figures are raw agreement on the author's first labels; with n = 15,
+no kappa is reported.
+
+- **Round 1** (items 1–8, first codebook): 3/8.
+  - On what the model and the developer had done, the two descriptions agreed on 7 of 8. The eighth
+    card had cut off the end of the developer region.
+  - The disagreements were about definitions, which were then revised:
+    - M classes describe a difference, not a model error;
+    - base counts as a version in M1;
+    - a redundant reference is not E3;
+    - E1 was renamed, with both of its causes stated.
+- **Round 2** (items 9–15, revised codebook): 4/7.
+  - Four of the 15 items had appeared as examples in the first codebook. On the four round-2 items
+    whose labels the author had not seen, agreement was 3/4.
+  - The remaining disagreements were about counting changes relative to base, which the codebook
+    now states explicitly.
+- **Overall:** 7/15.
+- **After the revision**, only the M1 rule was re-applied to all labels, by script: 2 labels changed
+  from M2 to M1. The other revisions changed wording only.
+
 ### Reproducing the tables
 
 ```bash
@@ -410,8 +537,15 @@ cp outputs/deepeval/unified_stage3_full.jsonl results/stage3_unified_eval_202610
 .venv-harness/bin/python -m harness.analyze \
     --single-shot outputs/eval/runs/eval_A_both_nojudge_stage3_rerun.jsonl \
     --csv results/stage3_single_shot_20261010.csv
+.venv-harness/bin/python -m harness.analyze outputs/inspect_logs/full/*.eval --signals \
+    --csv results/stage3_process_signals_20261012.csv
 python scripts/verify_numbers.py
 ```
+
+The failure labels in `results/stage3_failure_labels_20261012.csv` were assigned by hand from the
+cards (see [Failure analysis](#failure-analysis)); there is no command that regenerates them.
+`verify_numbers.py` checks that they cover exactly the agent misses and the single-shot-only misses
+of the frozen scoring file, and recomputes the counts and the agreement from them.
 
 ## Limitations
 
@@ -437,6 +571,17 @@ python scripts/verify_numbers.py
   because it ignores array dimensions. These two methods lie outside the block, so no resolution
   of this file can pass (2) or `check_java`, in either setting. In the agent run this led GPT to
   delete the block. The tables give rates without presto; the fix is left for later.
+- **One reference resolution.** The developer's resolution is one acceptable answer, not the only
+  one. It is sometimes redundant (in lanproxy the developer's file imports `Unpooled` twice), and
+  it often reflects a choice that the file alone does not explain (M2 in the
+  [failure analysis](#failure-analysis)).
+- **The judge sees only the conflict block**, not the file around it. It cannot credit an import
+  that the file already has outside the block (1 of the 8 E1 cases). Showing it the file's imports
+  would mean re-judging every group; this is left for later.
+- **Empty resolutions are not judged.** Deleting the block can be a valid resolution (2 cases here,
+  both probably equivalent), but the pre-registered rule counts it as a miss.
+- **The failure labels come from one annotator**, an LLM coding agent, checked by the author on 15
+  random cases (raw agreement 7/15; see [Agreement](#failure-analysis)).
 - **(2) on multi-block files** checks markers only. The other blocks keep their markers, so the
   file cannot be parsed.
 - **Single-shot cost is an estimate** (see above).
