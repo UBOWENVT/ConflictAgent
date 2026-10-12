@@ -10,7 +10,7 @@ The project combines:
 
 - a solver agent that generates and validates candidate resolutions without seeing ground truth;
 - a GEval (DeepEval) LLM-as-judge, validated against ConflictBench's human labels on the tools' resolutions (precision 100% / recall 64.6%, n=292);
-- a comparison against the five traditional ConflictBench merge tools (trivial baselines were used in an earlier milestone).
+- a comparison against the five traditional ConflictBench merge tools (trivial baselines were used in an earlier milestone);
 - an agent setting (2026-10): the same models as tool-using agents in a Docker sandbox, compared with the single-shot pipeline on the same conflicts under the same judge ([HARNESS.md](HARNESS.md)).
 
 ## Data

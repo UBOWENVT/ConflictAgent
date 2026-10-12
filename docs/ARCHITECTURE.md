@@ -82,9 +82,9 @@ The same models as tool-using agents in a Docker sandbox; design, scoring rules 
 - `harness/dataset.py`: builds each Inspect `Sample` from base/left/right only: the tagged conflict file plus `sides/{base,left,right}/<path>`. The developer's `child` never enters a sample.
 - `harness/task.py`: the Inspect task: `react` agent, tools, Docker sandbox, scorer, limits.
 - `harness/tools.py`, `harness/prompts.py`: `view_file`, `replace_text`, `check_java` (plus Inspect's `bash`), and the agent instructions.
-- `harness/sandbox/`: Dockerfile, `compose.yaml` (no network, no credentials, non-root) and `check_java.py`, which runs inside the container with a byte-identical copy of `validate.py`.
+- `harness/sandbox/`: the Dockerfile (runs as a non-root user), `compose.yaml` (no network, no credentials) and `check_java.py`, which runs inside the container with a byte-identical copy of `validate.py`.
 - `harness/scorers.py`: deterministic scoring of the final file: extraction, outcome, ②. No LLM judge runs inside Inspect.
-- `harness/export.py`: Inspect logs to `run_eval.py`-schema records for the offline judge.
+- `harness/export.py`: Inspect logs to `run_eval.py`-schema records for the offline judge. It is the only harness module that reads `child`, after the run, to compute the developer region the judge compares against.
 - `harness/analyze.py`, `harness/report.py`: process metrics, process signals and cost; result tables.
 
 ## Entrypoints
@@ -104,9 +104,9 @@ Current (DeepEval evaluation):
 Agent setting (see [HARNESS.md](HARNESS.md), "Reproducing the tables"):
 
 - `.venv-harness/bin/inspect eval harness/task.py --model <model>`: run the agent (Docker).
-- `python -m harness.export`: Inspect logs to JSONL for the judge.
-- `python -m evaluation.run_unified_eval`: score the agent, the single-shot rerun and June together.
-- `python -m harness.report`, `python -m harness.analyze`: result tables, process metrics, signals.
+- `.venv-harness/bin/python -m harness.export <logs> --out <jsonl>`: Inspect logs to JSONL for the judge.
+- `.venv/bin/python -m evaluation.run_unified_eval`: score the agent, the single-shot rerun and June together (the judge stack lives in `.venv`, not `.venv-harness`).
+- `.venv-harness/bin/python -m harness.report`, `.venv-harness/bin/python -m harness.analyze`: result tables, process metrics, signals.
 
 Historical (hand-built-judge era, superseded — kept for provenance, see DEVELOPMENT_LOG):
 
@@ -137,4 +137,4 @@ Evaluation may use:
 
 None of those signals can flow back into `agent.resolve`. In the agent setting the same boundary is
 enforced by the sandbox: a sample holds only base, left, right and the tagged conflict file, and
-`child` is read only by the offline scorer.
+`child` is read only after the run, by `harness/export.py`, to build the judge's reference.

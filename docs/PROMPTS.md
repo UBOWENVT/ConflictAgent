@@ -1,12 +1,12 @@
 # ConflictAgent — full prompt reference (solver)
 
 This file = everything actually sent to the solver LLM (OpenAI / Gemini), verbatim.
-Section 8 covers the agent setting (Inspect AI harness, `docs/HARNESS.md`), whose prompt lives in
-`harness/prompts.py` and `harness/dataset.py`.
 Source: `conflictagent/solver.py` — `SYSTEM_A` / `SYSTEM_B` + `build_prompt()` + `build_window()`.
 The judge is separate: it now runs as GEval (DeepEval), with criteria taken from `judge.py`'s
 JUDGE_SYSTEM rubric and carried by ① ResolutionAcceptability in `evaluation/metrics.py` — out of
 scope for this file.
+Section 8 covers the agent setting (Inspect AI harness, `docs/HARNESS.md`): its messages come from
+`harness/prompts.py` and `harness/dataset.py`; the tool schemas are not reproduced.
 
 Two changes since the 2026-06-08 redirect:
 
@@ -211,8 +211,9 @@ and error on 0 — if an OpenAI call fails on temperature during smoke testing, 
 
 ## 8. Agent setting (Inspect AI harness)
 
-The agent setting (`docs/HARNESS.md`) sends a different prompt: one system message, then one user
-message per sample, and the agent works through tool calls from there. The tools' own descriptions
+The agent setting (`docs/HARNESS.md`) sends a different prompt, from `harness/prompts.py` and
+`harness/dataset.py`: one system message, then one user message per sample, and the agent works
+through tool calls from there. The messages below are verbatim; the tool schemas are not reproduced. The tools' own descriptions
 are sent as tool definitions (`harness/tools.py`, plus Inspect's `bash` and `submit`). This is the
 text used in the full run; the logged system message of every sample equals it.
 

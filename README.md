@@ -70,9 +70,9 @@ the `child` file. This is offline-only; the agent loop never sees the developer 
 **Agent setting (2026-10)**
 
 The same models also run as tool-using agents in a Docker sandbox ([Inspect AI](https://inspect.aisi.org.uk/)):
-the container holds only the tagged conflict file and its three versions, and the agent views,
+the workspace holds only the tagged conflict file and its three versions, and the agent views,
 edits and syntax-checks the file itself before submitting. The final file is scored by the same
-rules and the same judge as the loop above. See [docs/HARNESS.md](docs/HARNESS.md).
+rules and the same judge as the pipeline's outputs. See [docs/HARNESS.md](docs/HARNESS.md).
 
 ## Why There Is No Single-Shot Baseline
 
