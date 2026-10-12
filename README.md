@@ -67,11 +67,19 @@ Two layers are kept strictly separate.
 The judge compares candidate resolutions against the developer's actual resolution extracted from
 the `child` file. This is offline-only; the agent loop never sees the developer answer.
 
+**Agent setting (2026-10)**
+
+The same models also run as tool-using agents in a Docker sandbox ([Inspect AI](https://inspect.aisi.org.uk/)):
+the container holds only the tagged conflict file and its three versions, and the agent views,
+edits and syntax-checks the file itself before submitting. The final file is scored by the same
+rules and the same judge as the loop above. See [docs/HARNESS.md](docs/HARNESS.md).
+
 ## Why There Is No Single-Shot Baseline
 
 An earlier design compared the retry loop against a single-shot round-0 baseline. That was dropped
 after full runs showed modern solver models usually emit syntactically valid answers on the first
-try, so retry-loop delta was not the main signal.
+try, so retry-loop delta was not the main signal. (In [docs/HARNESS.md](docs/HARNESS.md),
+"single-shot" means something else: the full retry pipeline above, compared with the agent setting.)
 
 The evaluation instead compares the LLM with the five traditional tools under the same judge.
 Trivial baselines (`pick-left`, `pick-right`, `pick-longer`, `union`) were scored in the earlier

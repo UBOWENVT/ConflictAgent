@@ -51,6 +51,33 @@ time; current results are in `docs/RESULTS.md`.
 - Judge-line input pipeline hardened (Scheme A): scenario-level file-level gate + `is_diff` fix in
   `clean_xlsx_snippet` (see `docs/DATA.md`).
 
+## 2026-10: agent setting (Inspect AI harness)
+
+- Added the agent setting (`harness/`, [HARNESS.md](HARNESS.md)): the same models on the same 67
+  Dataset B scenarios, as tool-using agents in a Docker sandbox, compared with the single-shot
+  pipeline under one judge.
+- Design decisions:
+  - each sample holds only the tagged conflict file and its three versions; `child` is read only by
+    the offline scorer;
+  - one judge instance scores three groups (agent, a same-day single-shot rerun, the June outputs)
+    after a byte-level check of the test inputs, which separates judge drift and model drift from
+    the setting;
+  - outcome rules, denominators and the headline (the lower provider) were fixed before the first
+    real-model run;
+  - the prompt and limits were tuned once on a 10-scenario trial and checked by a second trial.
+- Result: the two settings are comparable (lower provider 53.1% vs 46.9%; McNemar p = 0.58 and
+  0.38), at about 4–10 times the model calls.
+- Failure analysis of the 52 agent misses, with a codebook revised once after the author's spot
+  check of 15.
+- Corrections to the June notes in `docs/RESULTS.md`, with the figures unchanged: (2) split into
+  single-block and multi-block files; the judge accepted 3 of 3 genuinely unparseable outputs,
+  not "4 of 5".
+- Per-sample results frozen in `results/stage3_*`; `scripts/verify_numbers.py` recomputes the
+  quoted figures; GitHub Actions CI added.
+- Deferred (see the Limitations in HARNESS.md): the presto checker fix (array dimensions),
+  guarding references that contain markers, showing the judge the file's imports, judging empty
+  resolutions.
+
 ## Historical numbers archive — hand-built judge milestone (2026-06-09), superseded
 
 Kept only for provenance; **not** part of current results. Raw artifacts are local (gitignored),

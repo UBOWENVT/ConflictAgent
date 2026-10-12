@@ -43,6 +43,13 @@ evaluation.metrics            (the two DeepEval metrics)
 evaluation.run_suite          -> ③ judge meta-evaluation (① vs human labels on tool resolutions, n=292)
 evaluation.run_solver_eval    -> Dataset B: ① + ② over the solver line
 scripts/compare_tools_geval.py-> LLM vs ConflictBench's five tools, same ① judge
+
+harness/                      (agent setting, 2026-10; see docs/HARNESS.md)
+  -> harness.dataset: the same 67 Dataset B scenarios -> Inspect Samples (four files each, no child)
+  -> harness.task: Inspect react agent + tools + Docker sandbox + limits
+  -> harness.scorers: deterministic scoring of the final file (outcome, extraction, ②)
+  -> harness.export: Inspect logs -> run_eval.py-schema JSONL
+evaluation.run_unified_eval   -> one ① judge instance over several groups (agent, single-shot rerun, June)
 ```
 
 ## Core Modules
@@ -65,6 +72,20 @@ scripts/compare_tools_geval.py-> LLM vs ConflictBench's five tools, same ① jud
 - `evaluation/run_solver_eval.py`: Dataset B — runs ① + ② over the solver line, stratified by conflict type and provider. ② does NOT gate ①.
 - `evaluation/build_complete_set.py`: assembles the solver-output complete set fed to `run_solver_eval`.
 - `evaluation/audit_*.py`, `show_judge_inputs.py`, `trace_anchor_extraction.py`: input-fidelity / dev-region audits used to validate the pipeline.
+- `evaluation/run_unified_eval.py`: scores several groups of resolutions with one ① judge instance, after checking that every group's test inputs match the reference group's byte for byte (agent setting).
+
+### Agent setting (Inspect AI harness)
+
+The same models as tool-using agents in a Docker sandbox; design, scoring rules and results are in
+[HARNESS.md](HARNESS.md). It has its own environment (`.venv-harness`, `harness/requirements.txt`).
+
+- `harness/dataset.py`: builds each Inspect `Sample` from base/left/right only: the tagged conflict file plus `sides/{base,left,right}/<path>`. The developer's `child` never enters a sample.
+- `harness/task.py`: the Inspect task: `react` agent, tools, Docker sandbox, scorer, limits.
+- `harness/tools.py`, `harness/prompts.py`: `view_file`, `replace_text`, `check_java` (plus Inspect's `bash`), and the agent instructions.
+- `harness/sandbox/`: Dockerfile, `compose.yaml` (no network, no credentials, non-root) and `check_java.py`, which runs inside the container with a byte-identical copy of `validate.py`.
+- `harness/scorers.py`: deterministic scoring of the final file: extraction, outcome, ②. No LLM judge runs inside Inspect.
+- `harness/export.py`: Inspect logs to `run_eval.py`-schema records for the offline judge.
+- `harness/analyze.py`, `harness/report.py`: process metrics, process signals and cost; result tables.
 
 ## Entrypoints
 
@@ -79,6 +100,13 @@ Current (DeepEval evaluation):
 - `evaluation/run_solver_eval.py`: Dataset B — score solver outputs with ① + ②.
 - `scripts/compare_tools_geval.py`: LLM vs the five ConflictBench tools under the same ① judge.
 - `scripts/check_determinism.py`: spot-check temperature-0 solver reproducibility.
+
+Agent setting (see [HARNESS.md](HARNESS.md), "Reproducing the tables"):
+
+- `.venv-harness/bin/inspect eval harness/task.py --model <model>`: run the agent (Docker).
+- `python -m harness.export`: Inspect logs to JSONL for the judge.
+- `python -m evaluation.run_unified_eval`: score the agent, the single-shot rerun and June together.
+- `python -m harness.report`, `python -m harness.analyze`: result tables, process metrics, signals.
 
 Historical (hand-built-judge era, superseded — kept for provenance, see DEVELOPMENT_LOG):
 
@@ -107,4 +135,6 @@ Evaluation may use:
 - tool strategy/desirability labels;
 - ① GEval judge outputs (validated against human labels on tool resolutions: P=100% / R=64.6%, n=292).
 
-None of those signals can flow back into `agent.resolve`.
+None of those signals can flow back into `agent.resolve`. In the agent setting the same boundary is
+enforced by the sandbox: a sample holds only base, left, right and the tagged conflict file, and
+`child` is read only by the offline scorer.

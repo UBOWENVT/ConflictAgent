@@ -19,6 +19,25 @@ ablation.
 > Status: one full scored run, 2026-10-10. Results, the failure analysis and the limitations are
 > at the end of this page.
 
+## At a glance
+
+```mermaid
+flowchart TD
+    S["ConflictBench scenario<br/>base, left, right"] --> M["git merge-file --diff3<br/>tagged conflict file"]
+    M --> P["Single-shot pipeline<br/>one call, validate, retry (at most 4)"]
+    M --> X["Docker sandbox<br/>the tagged file + sides/base, left, right<br/>no network, no credentials"]
+    X --> A["Agent<br/>view_file, replace_text, check_java, bash, submit"]
+    A --> F["Scorer<br/>extract the block from the final file:<br/>outcome and (2)"]
+    F --> E["export: Inspect logs to JSONL"]
+    P --> J["One judge instance, offline<br/>groups: agent, single-shot rerun, June"]
+    E --> J
+    C["child: the developer's resolution"] -.->|"read only offline"| J
+    J --> R["(1) developer-match, (2) validity,<br/>paired comparison, failure analysis"]
+```
+
+The model never sees `child`. Both settings start from the same tagged conflict file, and one
+judge instance scores both of them, plus the June outputs.
+
 ## One scenario, end to end
 
 `junit4@4c8d3ff5`, the smallest file in the population, as it went through the full run. Each step
